@@ -13,7 +13,7 @@ dsh plugin --profile <profile> add dsh-better-notice
 ```
 
 - 包名：`dsh-better-notice`（模块 id 与包名相同）
-- 版本：`5.2.1`（见 [CHANGELOG.md](CHANGELOG.md)）
+- 版本：`5.3.0`（见 [CHANGELOG.md](CHANGELOG.md)）
 - 许可：MIT
 - 设置位置：**账号菜单 →「设置」→ 左导航「热表」**（`settings.section`，id `hotlist`，order `30`）
 
@@ -131,10 +131,10 @@ dsh plugin --profile <profile> add dsh-better-notice
 dsh --profile <profile>
 ```
 
-- **已发布到 npm：**[dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice)（当前 `5.2.1`）。如果 npm 拉不动，同样的 tarball 也附在[最新 Release](https://github.com/MeruSu/better-notice/releases) 里——`dsh plugin --profile <profile> add <绝对路径>/dsh-better-notice-5.2.1.tgz`，效果一样，同样要重启。
+- **已发布到 npm：**[dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice)（当前 `5.3.0`）。如果 npm 拉不动，同样的 tarball 也附在[最新 Release](https://github.com/MeruSu/better-notice/releases) 里——`dsh plugin --profile <profile> add <绝对路径>/dsh-better-notice-5.3.0.tgz`，效果一样，同样要重启。
 - 从**本地目录**安装时要用**绝对路径、正斜杠**：`dsh plugin` 是把参数在 profile 目录里转交给 pnpm 的，相对路径会指到 profile 里去。
 - 装目录用的是 `link:`，之后改代码不用重装：`client.js` 改完刷新页面即生效；`index.js` / `cordis.patch.yml` / `package.json` 改完要重启 GUI。
-- 想连 TTS 小工具一起用就装 git 仓库（见[提示音](#提示音与仓库自带的-tts-工具)）。npm 包的 `files` 带 `index.js`、`client.js`、`cordis.patch.yml`、`assets`、`locale`、`icon.svg` 和 `tools/attn-ring`；`tools/meru-tts` **不在包里**。
+- 想连 TTS 小工具一起用就装 git 仓库（见[提示音](#提示音与仓库自带的-tts-工具)）。npm 包的 `files` 带 `index.js`、`client.js`、`cordis.patch.yml`、`assets`、`locale`、`icon.svg`、`tools/attn-ring` 和 `tools/audio-endpoint`；`tools/meru-tts` **不在包里**。
 
 卸装：
 
@@ -156,7 +156,7 @@ host 路由在进程启动时创建，只刷新页面不够。
 
 在 GUI 的浏览器控制台里依次确认：
 
-1. `window.__HOTLIST_VERSION__` → 版本号，例如 `'5.2.1'`；
+1. `window.__HOTLIST_VERSION__` → 版本号，例如 `'5.3.0'`；
 2. `Object.keys(window.__HOTLIST__)` → `['version','settings','assets']`；
 3. 打开设置，左导航有**「热表」**，页面里是一块全局区 + **6** 张可折叠的类别卡；
 4. 侧栏的会话行前面出现了状态图标；
@@ -167,6 +167,10 @@ host 路由在进程启动时创建，只刷新页面不够。
 ```js
 await fetch('/hotlist-sound/attention.wav').then(r => [r.status, r.headers.get('content-type')])
 // → [200, 'audio/wav']
+
+await fetch('/hotlist-audio', { headers: { 'x-hotlist-audio': '1' } }).then(r => r.json())
+// → { ok: true, cached: false, name: ..., kindGuess: 'headphones' | 'speakers' | 'unknown', state: 'measured' | 'unknown', ... }
+// 不带那个请求头 → 403 { ok: false, reason: 'no-marker' }
 ```
 
 ## 用法细节
@@ -343,6 +347,26 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 
 `assets/sounds/attention.wav` 给 `error` 与 `pending`，`assets/sounds/complete.wav` 给 `completed`。置顶、报错、待处理、已完成四类默认 `sound.enabled: true`（4.6.3 起）；进行中与闲置默认关。想换成自己的声音，见[提示音与仓库自带的 TTS 工具](#提示音与仓库自带的-tts-工具)。
 
+### 只在耳机时响——严格音频门禁
+
+机器接着音箱时响一声，是**全屋子都听见**的噪音；接着耳机时响一声，才只是你的。**设置 → 「超级提醒」组 → 「只在耳机时响」**（`audio.smart`，5.3.0 起有、默认关）在播放器前面加一道门：
+
+| 探测结果 | 响不响 |
+|---|---|
+| 当前默认输出设备是**耳机** | 响 |
+| 是音箱 / HDMI / 显示器 | **不响** |
+| 探不出来（探测失败、超时、没有 `pwsh`、非 Windows） | **不响** |
+
+第三行才是关键：**不知道就不响**。规则是「**证明它是耳机，否则闭嘴**」，不是「除非证明不是耳机，否则照响」——否则探测坏掉的那个场景，恰好就是插件对着会议室外放的场景。其余一切不变：开关仍是**每类**的（`sound.enabled`），1500 ms 节流照旧，被门禁拦下的那一次**不消耗**节流窗口。
+
+- 门禁只管**提示音**。弹出图、tab 座位、超级提醒都不受影响。
+- 探测是走 Windows Core Audio API 的一次性 PowerShell 调用（`tools/audio-endpoint/audio-endpoint.ps1`，随包发布）。宿主最多每 60 秒跑一次并缓存结果（`GET /hotlist-audio`，需要 `x-hotlist-audio: 1` 请求头），所以播放永远不会等子进程。
+- **仅 Windows。** macOS 和没有 host 半边的浏览器里没有探测，因此这道门开着就等于不响。那边要么关掉它，要么一开始就别开。
+- 门禁只管**自动**播放。设置页里每类旁边那个 ▶（`assets.preview(category)`）是你自己按的，**永远会响**——否则你在扬声器上就没法试音效好不好。
+- `window.__HOTLIST__.audio()` 回答这个只读问题：`{ smart, state, kindGuess, name, error, asOf, pass }`。开着开关而 `pass: false`，意思就是「这台机器现在会保持沉默，原因在这里」。
+
+开着开关却听不到声音，先跑一次 `__HOTLIST__.audio()`：`state: "measured"` + `kindGuess: "speakers"` 说明门禁在按设计工作；`error: "script-missing"` 说明装的是残包。
+
 ### 判定优先级是固定的
 
 从上往下、第一条命中就定：**error > pending > completed > running > pinned > idle**。这条故意不开放给用户（它改的是语义，不是外观）。能改的只有每类的展示顺序 `order`——那是另一件事。
@@ -358,7 +382,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 - **折叠卡**：图标预览、类别名、`· 顺序 N`、五个只读小标签（Tab / 栏 / 顶 / 弹 / 音，高亮 = 开）、右端 caret。点整行展开，**可以同时开多张卡**。展开状态存 `sessionStorage`（`dsh.hotlist.open`），不写进设置。
 - **展开区**（紧凑多列）：① 图标（来源 / 上传 / 图标值 / 频率滑块）；② 动效（`motion` + 作用于 `glyph`/`row`）；③ 弹出（开关 / 弹出图 / 入场·待机·退出 / 出现侧·停留时长）；④ 音效（启用 / 来源 / 试听）；⑤ 顺序。
 - **全局区**：范围（当前工作区 / 全部 / 智能）、座位上限、**置顶最多显示**、刚完成保持时长（分钟）、全局音量、**最近窗口**（分钟）、`positions.tab`、`positions.topbar`、`positions.sidebar`（仅 API）、`takeOverStatusDot`。顶栏那一段（样式 / 标签显示 / 胶囊数 / 胶囊宽度 / 网页预览）只在 `positions.topbar` 打开时才存在。
-- **超级提醒组**，紧跟在全局区下面：`ring.pending`、`ring.error`、`ring.completed`，三个都是关。详见[超级提醒](#超级提醒)。
+- **超级提醒组**，紧跟在全局区下面：`ring.pending`、`ring.error`、`ring.completed`，三个都是关；再加一道**「只在耳机时响」**门禁（`audio.smart`，同样是关）。详见[超级提醒](#超级提醒)与[只在耳机时响](#只在耳机时响严格音频门禁)。
 - 越界写入会被夹回范围。写盘失败（localStorage 配额满）会在页脚提示，也能从 `window.__HOTLIST_SETTINGS__.lastError()` 拿到原因。
 
 ### 全局默认值
@@ -380,6 +404,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | `choices` | `{}` | 用户真选过的键；由 `writeSettings()` 写，不要手改 |
 | `takeOverStatusDot` | `true` | 顶掉其它插件（`dsh-sessions-manager`）画的行首状态点 |
 | `ring.pending` / `ring.error` / `ring.completed` | 全 `false` | 该状态出现时在最上层提醒一次；仅 Windows、仅主屏——见[超级提醒](#超级提醒) |
+| `audio.smart` | `false` | **严格的耳机门禁**：只有探测确认默认输出是耳机时才响；探不出来（失败 / 没有 `pwsh` / 非 Windows）也**不响**——见[只在耳机时响](#只在耳机时响严格音频门禁) |
 | `hideNativeDot` | `true` | 隐藏宿主原生状态槽（4.4 起无设置行，字段保留） |
 | `collect.completedTtlMs` | `420000`（7 分钟） | 1–1440 分钟 |
 | `collect.recentWindowMinutes` | `17` | **分钟**。设置页 `1`–`120`；走 API `0`–`120`（`0` = 不显示 `idle`） |
@@ -425,6 +450,8 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | 「只提醒我需要动手的」 | 只留 `error` + `pending` | 把 `completed`/`running`/`idle` 的 `surfaces` 全关 | `{tab:false,sidebar:false,topbar:false}` |
 | 「想更显眼」 | 加弹出、加声音、加动效 | `popout.enabled`、`sound.enabled`、`frequency` 调高 | `popout.displayMs: 12000`，`frequency: 1`，`overlay.sizeMin/sizeMax` 调高 |
 | 「看不到某一类」 | 三个开关按序排查 | ① `categories.<id>.enabled` ② 它的 `surfaces` ③ `idle` 的最近窗口 | ① 必须 `true` ② 那个面的那一位必须 `true` ③ `recentWindowMinutes > 0` |
+| 「只在戴耳机的时候响」 | 严格音频门禁，不是音量问题 | `audio.smart = true` | 只在用户明确要求时开；同时说明「探不出来就不响」，以及 `__HOTLIST__.audio()` 能解释为什么没响 |
+| 「开了只在耳机时响，现在完全不响了」 | 门禁在设计内拒绝 | 先读 `__HOTLIST__.audio()`，别急着改 | `kindGuess: 'speakers'` / `state: 'unknown'` = 正按设计工作；**不要**靠放宽门禁去「修」它 |
 | 「改了没生效」 | 分情况 | 改 `client.js` → 刷新页面；改 `index.js` → **重启 GUI**；只改设置值 → 看 `lastError()`，多半被夹回默认 | — |
 | 「顶栏什么时候有」 | 只有 Windows 桌面（macOS 永远没有） | `positions.topbar`，浏览器预览加 `topbar.previewInWeb` | Windows 默认 `true`；浏览器里要开预览开关 |
 | 「怎么置顶／取消置顶」 | 不在本插件 | 宿主侧栏行自带菜单 | 我们只读；`pinned.maxSeats` 只控制显示几个 |
@@ -452,7 +479,7 @@ window.__HOTLIST_SETTINGS__.set(next);
 
 ## 提示音与仓库自带的 TTS 工具
 
-**先说结论：不装任何东西也能响。** 插件自带两个音效——`attention.wav` 给报错和待处理、`complete.wav` 给完成。置顶、报错、待处理、已完成这四类 `sound.enabled` **默认就是开的**（4.6.3 起）；但注意**置顶没有内置音效**，开关虽开也响不了，要响得自己传一条。进行中与闲置默认静音。下面这套只在你想**加新的台词、或者换音色**时才需要。
+**先说结论：不装任何东西也能响。** 插件自带两个音效——`attention.wav` 给报错和待处理、`complete.wav` 给完成。置顶、报错、待处理、已完成这四类 `sound.enabled` **默认就是开的**（4.6.3 起）；但注意**置顶没有内置音效**，开关虽开也响不了，要响得自己传一条。进行中与闲置默认静音。**提示音还能只让耳机响**——见[只在耳机时响](#只在耳机时响严格音频门禁)：一个开关，默认关。下面这套只在你想**加新的台词、或者换音色**时才需要。
 
 ### 1. 本地没有语音生成能力，就用仓库里这个
 
@@ -546,7 +573,7 @@ s.lastError()      // 最近一次写盘错误（字符串或 null）
 
 // 设置 + 三个素材池
 const api = window.__HOTLIST__;
-api.version                                        // '5.2.1'
+api.version                                        // '5.3.0'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }
@@ -557,6 +584,7 @@ api.assets.preview('pending')                      // 立刻试听 → boolean
 
 // 只读探针，给脚本与验收脚本用
 api.topbar()                                       // → { mounted, mode, titleMode, left, leftSource, measured, reserve, currentId, capacity, chips }
+api.audio()                                        // → { smart, state, kindGuess, name, error, asOf, pass }；播放器还没挂时为 null
 api.export({ format: 'md' })                       // 导出会话清单，md | txt | json（裸调用也能用）
 ```
 
@@ -564,6 +592,7 @@ api.export({ format: 'md' })                       // 导出会话清单，md | 
 - `category`：`'pinned' | 'error' | 'pending' | 'completed' | 'running' | 'idle'`。
 - `add` 的 `reason` 是 `invalid` / `full` / `refused` / `budget` 之一。
 - `export()`：`format` 是 `md` | `txt` | `json`（**不是** `markdown`）；显式 `ids` 优先于 `scope`；`md`/`txt` 带 BOM，`json` 不带；纯函数，同一快照导两次逐字节相同。
+- `audio()` 也不写任何东西。`pass` 是门禁**此刻**会给出的答案：开关关着时永远是 `true`；开着时要等探测测到耳机才变 `true`。`null` 表示音效播放器还没挂上。
 - `topbar()` 只读。`leftSource` 告诉你 band 的左边界来自 `occupied`（命中测试）、`menu` 还是 `fallback`——验收脚本读的就是这个字段。
 
 **两个坑**：
@@ -588,12 +617,13 @@ api.export({ format: 'md' })                       // 导出会话清单，md | 
 11. **音效有 1.5 秒全局节流。** 两次播放间隔不足 1500ms 时后来的那条直接丢弃；冷启动首轮只记不播。这条只有源码与单测口径（组 `sound player dedupe`）——真机上很难构造连续两次真实状态转换。
 12. **设置与页面端口绑定。** `localStorage` 挂在 origin 上，GUI 端口变了就是另一个 origin。
 13. **超级提醒只在 Windows 上能用，而且只盖主屏。** 脚本是 PowerShell + WPF，页面只能*请求*宿主去跑它：别的平台上开关会存下你的选择，但什么都不会升起来。它也只在主显示器上出现，副屏不会闪。
+14. **耳机门禁故意严格，而且只在 Windows 上有效。** 开着 `audio.smart` 时，只有探测**测到**默认输出是耳机才响。探测失败、超时、没有 `pwsh`、非 Windows——全都是**不响**，而不是「大概没事」。跑一次 `__HOTLIST__.audio()` 就知道自己碰到的是哪一种。
 
 ## 改这个插件
 
 给「拿到仓库就要动手改」的人或 AI。目标：读完这一节能定位改哪、改完能自己验证，不用回来问。
 
-> **行号怎么用**：下面的 `client.js:NNN` 是 4.6.3 发布时的位置，只作**起点**。文件一改行号就漂，所以先按**符号名**搜（`grep -n 'function classify' client.js`），行号对不上是正常的，符号名才是准的。`test/classify.test.mjs` 同理：组名比行号稳。
+> **行号怎么用**：下面的 `client.js:NNN` 是 5.3.0 发布时的位置，只作**起点**。文件一改行号就漂，所以先按**符号名**搜（`grep -n 'function classify' client.js`），行号对不上是正常的，符号名才是准的。`test/classify.test.mjs` 同理：组名比行号稳。
 
 ### 一句话架构
 
@@ -616,18 +646,18 @@ ctx.get('uiWorkspace').workspaces.list             ← 工作区分组 + pinnedS
 ctx.remote.$on('api-session/error', …)             ← agent 级报错
                  │
                  ▼
-        classify()      判类别与 token            client.js:2087
-        sortSeats()     同类别内排序               client.js:2153
-        buildSeatPlan() 套上限、给出座位 order      client.js:2176
+        classify()      判类别与 token            client.js:2103
+        sortSeats()     同类别内排序               client.js:2169
+        buildSeatPlan() 套上限、给出座位 order      client.js:2192
                  │
      ┌───────────┴────────────┬──────────────────┐
      ▼                        ▼                  ▼
 mountTabSeats()        createSidebarAdapter()  HotlistSettingsPage()
 tab 座位（conversation.view）  侧栏 DOM 增强      设置页（settings.section）
-client.js:5592                client.js:2998    client.js:3746
+client.js:5667                client.js:3014    client.js:3762
 ```
 
-三个纯函数（`classify` / `sortSeats` / `buildSeatPlan`）不碰 DOM、可以喂假数据，是**改行为最安全的入口**。它们的返回值也是 `window.__HOTLIST__` 之外唯一的调试抓手——`client.js` 末尾的导出表（`client.js:6973` 起）把 `classify` / `sortSeats` / `buildSeatPlan` / `readSettings` / `defaultSettings` / `sanitizeSettings` / `sidebarStateOf` / `HotlistSettingsPage` 都交了出来，单测就是靠这张表跑真源码的。
+三个纯函数（`classify` / `sortSeats` / `buildSeatPlan`）不碰 DOM、可以喂假数据，是**改行为最安全的入口**。它们的返回值也是 `window.__HOTLIST__` 之外唯一的调试抓手——`client.js` 末尾的导出表（`client.js:7058` 起）把 `classify` / `sortSeats` / `buildSeatPlan` / `readSettings` / `defaultSettings` / `sanitizeSettings` / `sidebarStateOf` / `HotlistSettingsPage` 都交了出来，单测就是靠这张表跑真源码的。
 
 ### 改一处要碰哪几处
 
@@ -641,7 +671,7 @@ client.js:5592                client.js:2998    client.js:3746
 
 **3）加一个动效**
 
-`MOTION_NAMES`（`client.js:272`）加名字 → `MOTION_MS`（`client.js:2730`）加时长 → `SIDEBAR_STYLE`（`client.js:2752`）里加 `@keyframes hl-<名字>`（只动 `transform` / `opacity`）→ 要做文字版就在 `TEXT_MOTION`（`client.js:2739`）与 `TEXT_BURST`（`client.js:2746`）各加一条 + `@keyframes hl-text-<名字>`。同屏并发上限是 `MOTION_CONCURRENCY`（`client.js:310`）。
+`MOTION_NAMES`（`client.js:272`）加名字 → `MOTION_MS`（`client.js:2746`）加时长 → `SIDEBAR_STYLE`（`client.js:2768`）里加 `@keyframes hl-<名字>`（只动 `transform` / `opacity`）→ 要做文字版就在 `TEXT_MOTION`（`client.js:2755`）与 `TEXT_BURST`（`client.js:2762`）各加一条 + `@keyframes hl-text-<名字>`。同屏并发上限是 `MOTION_CONCURRENCY`（`client.js:310`）。
 
 **4）加一个弹出图点位**
 
@@ -663,10 +693,10 @@ client.js:5592                client.js:2998    client.js:3746
 
 - 字段：`settings.categories.<类别>.glyph.motionTarget`
 - 取值：`'glyph'` = 只动图标；`'row'` = 图标 + 标题一起动。
-- **4.6.0 起默认统一成 `'row'`**（`defaultGlyph()`，`client.js:351`）。
+- **4.6.0 起默认统一成 `'row'`**（`defaultGlyph()`，`client.js:355`）。
 
 ```js
-// 改法一：改所有类别的默认值（源码，defaultGlyph() client.js:351）
+// 改法一：改所有类别的默认值（源码，defaultGlyph() client.js:355）
 function defaultGlyph(category) {
   return {
     kind: 'emoji',
@@ -681,7 +711,7 @@ function defaultGlyph(category) {
 ```
 
 ```js
-// 改法二：逐类决定（源码，defaultCategory() client.js:364 里覆盖）
+// 改法二：逐类决定（源码，defaultCategory() client.js:368 里覆盖）
 // 例如只让「待处理」连标题一起动：
 glyph: { ...defaultGlyph(category), motionTarget: category === 'pending' ? 'row' : 'glyph' },
 ```
@@ -695,16 +725,16 @@ window.__HOTLIST_SETTINGS__.set({
 
 **改法三有个坑**：`set` 只做两级浅合并，`glyph` / `popout` / `sound` 是**整块替换**，上面那行会把 `pending.glyph` 的 `value`、`motion`、`frequency` 全洗回默认。正确姿势是先 `get()`、改整个对象、再 `set()`。
 
-加一条新的文字动效：`TEXT_MOTION`（`client.js:2739`，常驻循环）与 `TEXT_BURST`（`client.js:2746`，单次爆发）各加一条，`MOTION_MS`（`client.js:2730`）加时长，`SIDEBAR_STYLE`（`client.js:2752`）里加 `@keyframes hl-text-<名字>`。文字 keyframes **只动 `opacity` 与 1–2px 位移，不加 `scale`**（会发虚）；并发仍受 `MOTION_CONCURRENCY`（`client.js:310`）约束，频率是每类独立的 `glyph.frequency`。
+加一条新的文字动效：`TEXT_MOTION`（`client.js:2755`，常驻循环）与 `TEXT_BURST`（`client.js:2762`，单次爆发）各加一条，`MOTION_MS`（`client.js:2746`）加时长，`SIDEBAR_STYLE`（`client.js:2768`）里加 `@keyframes hl-text-<名字>`。文字 keyframes **只动 `opacity` 与 1–2px 位移，不加 `scale`**（会发虚）；并发仍受 `MOTION_CONCURRENCY`（`client.js:310`）约束，频率是每类独立的 `glyph.frequency`。
 
 ### 升级不破坏用户设置
 
-**承诺：升级插件永远不改掉用户已经选过的设置。** 仍然等于我们某一代出厂默认的值不算「选过」——它跟随当前默认（见下面那条 `LEGACY_VALUES`）；除此之外盘上的值一律优先。用户**真选过**的字段是他自己的，哪怕值恰好等于某个预设：`choices`（`client.js:1972`）记下这些选择，预设规则动它之前先看这张表。
+**承诺：升级插件永远不改掉用户已经选过的设置。** 仍然等于我们某一代出厂默认的值不算「选过」——它跟随当前默认（见下面那条 `LEGACY_VALUES`）；除此之外盘上的值一律优先。用户**真选过**的字段是他自己的，哪怕值恰好等于某个预设：`choices`（`client.js:1988`）记下这些选择，预设规则动它之前先看这张表。
 
 怎么做到：
 
 - **默认值只用来补缺**，盘上已有的值永远优先。`sanitizeSettings()` 的写法是「先拿 default，再逐字段看盘上有没有合法值，有就用盘上的」——所以改 `CATEGORY_ORDER`、改 `defaultGlyph()` 对老用户是**完全无感**的。
-- **出厂预设是我们的，不是用户的**：盘上某个值只等于我们过去某一代发的默认值（闲置图标 `💤`、动效 `blink` / `none`、`motionTarget: 'glyph'`、频率 `1`、音效关），就跟随当前默认——这样老安装不用用户重新设置也能看到冰块图标和 4.6.3 那套动效表。这张表是 `LEGACY_VALUES`（`client.js:214`），和类别 `order` 等于历史默认值时的判据（`LEGACY_DEFAULTS`）是同一条分界线。用户一旦动过那个字段，值就是用户的，我们再也不碰；不是任何一代默认值的值一字不动。「动过」是显式记下来的：`choices` `{ "<路径>": true }`（`client.js:1014-1055`），只由 `writeSettings()` 用**传进来的 patch** 写，所以被预设规则改写过、用户没选过的值混不进来；`resetSettings()` 会把整张表清空，因为恢复默认等于重新认可出厂预设。
+- **出厂预设是我们的，不是用户的**：盘上某个值只等于我们过去某一代发的默认值（闲置图标 `💤`、动效 `blink` / `none`、`motionTarget: 'glyph'`、频率 `1`、音效关），就跟随当前默认——这样老安装不用用户重新设置也能看到冰块图标和 4.6.3 那套动效表。这张表是 `LEGACY_VALUES`（`client.js:214`），和类别 `order` 等于历史默认值时的判据（`LEGACY_DEFAULTS`）是同一条分界线。用户一旦动过那个字段，值就是用户的，我们再也不碰；不是任何一代默认值的值一字不动。「动过」是显式记下来的：`choices` `{ "<路径>": true }`（`client.js:1024-1065`），只由 `writeSettings()` 用**传进来的 patch** 写，所以被预设规则改写过、用户没选过的值混不进来；`resetSettings()` 会把整张表清空，因为恢复默认等于重新认可出厂预设。
 - **加字段**：在 `sanitize*` 里给个 fallback 就够了，**不要升 `SETTINGS_VERSION`**。升号意味着「必须有迁移」，而迁移写错会静默洗掉用户数据。
 - **真要改数据结构**（删字段、换含义）：必须保留「读旧值 → 转换 → 丢弃旧字段」这条链（现住在 `sanitizeSettings()` 里，v3.1 → v4 就是这么过的），并把 `SETTINGS_VERSION` 升最小的号。`migrate v3 to v4` 一组就是这条链的验收。
 
@@ -731,7 +761,7 @@ window.__HOTLIST_SETTINGS__.set({
 ```powershell
 node --check client.js          # 语法。client.js 包在模块加载器里，语法错只在真机 boot 时炸
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 112 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 115 groups
 ```
 
 外加一道**保存前的静态闸门**（只在维护者机器上有，不随仓库分发）：
@@ -747,7 +777,7 @@ cd <你 clone 下来的那个目录>
 
 node --check client.js          # client.js 包在模块加载器里，语法错只在真机 boot 时炸
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 112 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 115 groups
 ```
 
 单测把真实的 `client.js` 源文件读进来，塞进 `window.__ModuleLoader__` 的桩里执行：假的是浏览器（手写的极简 `window` / `document`，不引 jsdom，`React` 也是桩），跑的是真源码。里面还带几道静态扫描：引用未声明的常量、注入样式选择器合法性、快捷键 label 必须是 thunk。
@@ -758,13 +788,14 @@ node test/classify.test.mjs     # 期望最后一行：PASS — 112 groups
 
 ```
 client.js              全部界面逻辑（浏览器侧）
-index.js               宿主侧：注册 /hotlist-sound/ 音频路由
+index.js               宿主侧：注册 /hotlist-sound、/hotlist-ring、/hotlist-audio 三条路由
 cordis.patch.yml       bundle 插入行
 assets/                3 类各 4 档弹出图素材 + 六类各一份 svg
 assets/sounds/         内置音效（attention.wav / complete.wav）
-test/classify.test.mjs 单测（112 组）
+test/classify.test.mjs 单测（115 组）
 docs/                  架构、测试、扩展三份维护者文档
 tools/attn-ring/       超级提醒脚本（PowerShell + WPF；随包发布）
+tools/audio-endpoint/  默认输出探测（Windows Core Audio，走 PowerShell；随包发布）
 tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运行）
 ```
 
@@ -772,7 +803,7 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 
 十一条已经真实踩过、并且让你多花调试时间的问题（其中一条还搞坏过一个版本）。每条都写清「不这么做会怎样」。
 
-1. **传给宿主的回调必须是 thunk，不能是值。** 宿主自己在 `refreshLabels()` 里直接调 `command.label()`（`dsh-client-shortcuts/lib/client.js:1190`）；传字符串就是 `TypeError: command.label is not a function`，它会把 `uiWorkspace` 一起带走——**整个 Web UI 起不来，只剩一条 `Failed to load plugins`，二十来个插件条目挂在 pending**。v4.3.0 就是这么坏掉的。设置页那条 `label: () => t('settings.nav')`（`client.js:5240`）同理，别改成直接传值。单测抓不到，因为 `shortcuts` 是桩、桩从不调 `label()`——**宿主会调的入参回调，桩里必须真的调一次。**
+1. **传给宿主的回调必须是 thunk，不能是值。** 宿主自己在 `refreshLabels()` 里直接调 `command.label()`（`dsh-client-shortcuts/lib/client.js:1190`）；传字符串就是 `TypeError: command.label is not a function`，它会把 `uiWorkspace` 一起带走——**整个 Web UI 起不来，只剩一条 `Failed to load plugins`，二十来个插件条目挂在 pending**。v4.3.0 就是这么坏掉的。设置页那条 `label: () => t('settings.nav')`（`client.js:5315`）同理，别改成直接传值。单测抓不到，因为 `shortcuts` 是桩、桩从不调 `label()`——**宿主会调的入参回调，桩里必须真的调一次。**
    *不这么做会怎样：* 不是插件不生效，是整个页面都加载不出来。
 
 2. **包名、模块 id、bundle 条目必须是同一个字符串。** `package.json` 的 `name` = `window.__ModuleLoader__.load({ id })` 里的 `id` = profile 里 `dsh.profile.bundles` 记的那一项。
@@ -784,7 +815,7 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 4. **我们注册的静态路由不鉴权。** `/hotlist-sound/*` 与 `/plugins/**/assets/*` 不校验 token，能连到端口的人都能取。
    *不这么做会怎样：* 你等于开了一条泄露路径。只放公开素材，永远别放用户数据。
 
-5. **用户设置永远不许覆盖。** `sanitizeSettings()`（`client.js:1197`）是纯函数、**逐字段回落而不是整块回落**；未知键被收进 `PRESERVED_KEY`（`client.js:169`）下次读回；超范围原值记在 `outOfRangeOf`（`client.js:1697`）也会还回去；最近五次写入滚动存在备份环（`BACKUP_KEY`，`client.js:171`，`BACKUP_LIMIT = 5`）。迁移里**绝对不要**用 `defaultSettings()` 重建对象——那会静默洗掉用户的每一个自定义值。
+5. **用户设置永远不许覆盖。** `sanitizeSettings()`（`client.js:1209`）是纯函数、**逐字段回落而不是整块回落**；未知键被收进 `PRESERVED_KEY`（`client.js:169`）下次读回；超范围原值记在 `outOfRangeOf`（`client.js:1713`）也会还回去；最近五次写入滚动存在备份环（`BACKUP_KEY`，`client.js:171`，`BACKUP_LIMIT = 5`）。迁移里**绝对不要**用 `defaultSettings()` 重建对象——那会静默洗掉用户的每一个自定义值。
    *不这么做会怎样：* 用户整套配置没了，而且不知道什么时候没的。唯一退路是 `window.__HOTLIST__.settings.backups()` / `.restore(i)`。
 
 6. **只有数据结构真的变了才动 `SETTINGS_VERSION`，并且迁移要同一个提交里写完。** 纯默认值调整、新增可选字段，只需要在 `sanitize*` 里给 fallback，不需要抬版本号。
@@ -796,7 +827,7 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 8. **三个硬上限是写死的，不是设置项。** `PLAN_MAX_ROWS = 37`（`client.js:297`）从尾部裁、保住优先级头部；`MOTION_CONCURRENCY = 4`（`client.js:310`）限制同屏动效数；`PINNED_SEATS = {min: 0, max: 12}`（`client.js:294`）。
    *不这么做会怎样：* 你想靠调大 `maxSeats` 解决「计划被截断」，但 `maxSeats` 本身也超不过行上限。
 
-9. **判定优先级只有一个真源，而且是两个函数。** `classify()`（`client.js:2087-2145`）决定 tab 座位与弹出，`sidebarStateOf()`（`client.js:2960-2996`）决定侧栏图标；两者共用 `error > pending > completed > running > pinned > idle` 这个顺序，但附加条件不同。
+9. **判定优先级只有一个真源，而且是两个函数。** `classify()`（`client.js:2103-2161`）决定 tab 座位与弹出，`sidebarStateOf()`（`client.js:2976-3012`）决定侧栏图标；两者共用 `error > pending > completed > running > pinned > idle` 这个顺序，但附加条件不同。
    *不这么做会怎样：* 你只改了一个，同一个会话在两个面上显示成两个状态——4.6.0 之前就是这个 bug。
 
 10. **`dsh plugin add` 对已装的插件不会重写 bundle 条目，而且运行中的 GUI 占着文件。** 先 `remove` 再 `add`；覆盖安装前先关掉那个 profile 的 GUI，否则复制会以 `EPERM` 失败。
@@ -814,6 +845,7 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 - [docs/TESTING.md](docs/TESTING.md) — 单测各组验什么、真机验收清单
 - [docs/EXTENDING.md](docs/EXTENDING.md) — 对外 API、设置形状、素材上限与批量导入
 - [tools/attn-ring/README.md](tools/attn-ring/README.md) — 超级提醒脚本自己的说明（随包发布）
+- [tools/audio-endpoint/README.md](tools/audio-endpoint/README.md) — 耳机探测脚本自己的说明（随包发布）
 - [tools/meru-tts/README.md](tools/meru-tts/README.md) — TTS 小工具自己的说明（只在 clone 仓库时有）
 - [CHANGELOG.md](CHANGELOG.md) — 版本历史
 

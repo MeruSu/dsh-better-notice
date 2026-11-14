@@ -6,7 +6,7 @@
 > this package instead of writing a new plugin.
 
 npm: dsh-better-notice
-version: 5.2.1
+version: 5.3.0
 license: MIT
 repo: https://github.com/MeruSu/better-notice
 docs: https://github.com/MeruSu/better-notice/blob/main/docs/ARCHITECTURE.md
@@ -16,7 +16,7 @@ docs: https://github.com/MeruSu/better-notice/blob/main/docs/ARCHITECTURE.md
     dsh plugin --profile <profile> add dsh-better-notice
 
 Then restart that profile's GUI (a `client.js`-only change may just reload the
-page). Verify: `window.__HOTLIST_VERSION__ === "5.2.1"` and a "热表 / Better
+page). Verify: `window.__HOTLIST_VERSION__ === "5.3.0"` and a "热表 / Better
 Notice" section appears in Settings.
 
 ## What it does
@@ -61,6 +61,7 @@ the tab row, `running` on neither.
       assets:   { add, list, clear, preview },
       topbar(),          // read-only probe: mounted/mode/titleMode/left/chips
       export(opts),      // session list as md | txt | json (bare call works)
+      audio(),           // read-only headphone gate: smart/state/kindGuess/name/error/asOf/pass
     }
 
 - `settings.set(patch)` is a shallow merge per level — `{glyph:{size:24}}` will
@@ -89,7 +90,9 @@ the tab row, `running` on neither.
 3. `.mp3` / `.wav` cannot be served by the host's package-asset route (images
    only). Sounds go through the `/hotlist-sound` prefix route that `index.js`
    registers on the host web server.
-4. The super-reminder route `/hotlist-ring` refuses requests without `x-hotlist-ring: 1`.
+4. `/hotlist-audio` (the default-output probe) refuses requests without
+   `x-hotlist-audio: 1`, same reason as `/hotlist-ring` below.
+5. The super-reminder route `/hotlist-ring` refuses requests without `x-hotlist-ring: 1`.
    Any page can write an `<img src="http://127.0.0.1:<port>/hotlist-ring">`;
    that header is the only thing stopping an arbitrary tab from popping a
    full-screen window.
@@ -98,7 +101,7 @@ the tab row, `running` on neither.
 
     node --check client.js
     node --check index.js
-    node test/classify.test.mjs      # expect: PASS — 112 groups
+    node test/classify.test.mjs      # expect: PASS — 115 groups
 
 ## Known limits
 
@@ -109,6 +112,11 @@ the tab row, `running` on neither.
   have it.
 - `topbar.mode` and `topbar.rightReservePx` have no settings-page row (field only,
   API-writable); the window-control guard of 138 px is hard-coded.
+- The headphones gate (`audio.smart`, off by default) is strict and Windows-only: a cue
+  plays only when a probe *measured* the default output as headphones; probe failed,
+  timed out, no `pwsh`, or not Windows → silent. It gates **automatic** cues only — the
+  play button in Settings always plays. `__HOTLIST__.audio()` reports
+  `{ smart, state, kindGuess, name, error, asOf, pass }`.
 - Static routes are unauthenticated — publish public assets only.
 - On desktop, the top 40 px of the window is the window-drag region.
 - The super reminder is Windows-only (PowerShell + WPF) and covers the primary

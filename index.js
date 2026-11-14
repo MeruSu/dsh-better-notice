@@ -20,8 +20,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +47,15 @@ const RING_ANIMS = ["Expand", "Breathe", "None", "Gif"];
 /** Which clip a `Gif` ring plays. `error` and `pending` share the smack, `completed` waves. */
 const RING_GIF_CATEGORIES = ["error", "pending", "completed"];
 
+/** Prefix for the audio-endpoint probe. GET only, one header required. */
+const AUDIO_ROUTE = "/hotlist-audio";
+
+/** The probe script ships inside the package, like the ring script. */
+const AUDIO_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "tools", "audio-endpoint", "audio-endpoint.ps1");
+
+/** How long one probe result stays usable before the script runs again. */
+const AUDIO_TTL_MS = 60 * 1000;
+
 /** One ring per this window: a burst of state changes must not stack processes. */
 const RING_COOLDOWN_MS = 2500;
 
@@ -59,6 +69,9 @@ const SOUND_MEDIA_TYPES = new Map([
 
 /** Last time a ring was started, in ms; the cooldown reads it. */
 let ringLastAt = -Infinity;
+
+/** One slot for the audio probe: the payload, when it was taken, and whether a run is in flight. */
+let audioCache = { at: -Infinity, payload: null, pending: false };
 
 /** Bare file name of a cue URL, or undefined when the name is not a plain file of a served type. */
 function servedName(pathname) {
@@ -204,6 +217,101 @@ function serveRing(request, deps = {}) {
 }
 
 /**
+ * Run the audio-endpoint script once and cache the payload.
+ *
+ * The probe writes one JSON line on stdout, and this sandbox refuses named
+ * pipes, so stdout goes to a temp file the host opens itself (`stdio` gets the
+ * file descriptor, not a pipe). Business failures are still exit 0 and JSON on
+ * that line — an unreadable file is cached as `unknown` rather than retried
+ * every request.
+ */
+function spawnAudioProbe(deps = {}) {
+  const log = typeof deps.log === "function" ? deps.log : (message, ...rest) => console.debug("[hotlist]", message, ...rest);
+  if (audioCache.pending) return false;
+  if (existsSync(AUDIO_SCRIPT) === false) {
+    audioCache = { at: Date.now(), payload: unknownAudioPayload("script-missing"), pending: false };
+    return false;
+  }
+  const tmp = join(tmpdir(), `hotlist-audio-${process.pid}-${Date.now()}.json`);
+  let fd;
+  try {
+    fd = openSync(tmp, "w");
+  } catch {
+    return false;
+  }
+  audioCache = { ...audioCache, pending: true };
+  let child;
+  try {
+    child = spawn(resolvePwsh(), ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", AUDIO_SCRIPT], {
+      stdio: ["ignore", fd, "ignore"],
+      windowsHide: true,
+    });
+  } catch (thrown) {
+    try { closeSync(fd); } catch {}
+    try { unlinkSync(tmp); } catch {}
+    audioCache = { at: Date.now(), payload: unknownAudioPayload("spawn-threw"), pending: false };
+    log("audio probe spawn threw", thrown instanceof Error ? thrown.message : String(thrown));
+    return false;
+  }
+  const settle = (payload) => {
+    try { closeSync(fd); } catch {}
+    try { unlinkSync(tmp); } catch {}
+    audioCache = { at: Date.now(), payload, pending: false };
+  };
+  child.on("error", (thrown) => {
+    settle(unknownAudioPayload("spawn-failed"));
+    log("audio probe spawn failed", thrown instanceof Error ? thrown.message : String(thrown));
+  });
+  child.on("close", (code) => {
+    let payload = null;
+    try {
+      const line = readFileSync(tmp, "utf8").trim().split(/\r?\n/).filter(Boolean).pop();
+      if (typeof line === "string") payload = JSON.parse(line);
+    } catch {
+      payload = null;
+    }
+    settle(payload === null ? unknownAudioPayload(`exit-${code}`) : payload);
+  });
+  if (typeof child.unref === "function") child.unref();
+  log("audio probe started");
+  return true;
+}
+
+/** The honest "no answer" payload: `state: unknown` is what the client gate refuses. */
+function unknownAudioPayload(reason) {
+  return {
+    name: null,
+    direction: "render",
+    kindGuess: "unknown",
+    guess: false,
+    state: "unknown",
+    asOf: Date.now(),
+    elapsedMs: 0,
+    error: reason,
+  };
+}
+
+/** One audio probe request. A fresh cache answers instantly; otherwise a background run starts. */
+function serveAudio(request) {
+  try {
+    if (request.headers.get("x-hotlist-audio") !== "1") {
+      return Response.json({ ok: false, reason: "no-marker" }, { status: 403 });
+    }
+    const now = Date.now();
+    if (audioCache.payload !== null && now - audioCache.at <= AUDIO_TTL_MS) {
+      return Response.json({ ok: true, cached: true, ...audioCache.payload });
+    }
+    spawnAudioProbe();
+    if (audioCache.payload !== null) return Response.json({ ok: true, cached: false, ...audioCache.payload });
+    return Response.json({ ok: true, cached: false, ...unknownAudioPayload("measuring") });
+  } catch (thrown) {
+    const log = (message, ...rest) => console.debug("[hotlist]", message, ...rest);
+    log("audio request failed", thrown instanceof Error ? thrown.message : String(thrown));
+    return Response.json({ ok: false, reason: "error" }, { status: 500 });
+  }
+}
+
+/**
  * Mount the two routes once a Web server exists; without one (a headless
  * profile) the plugin still loads, cues stay silent and the ring never fires.
  */
@@ -227,7 +335,16 @@ function apply(ctx) {
         }),
       "hotlist: full-screen ring",
     );
+    webCtx.effect(
+      () =>
+        webCtx.webServer.register({
+          kind: "prefix",
+          path: AUDIO_ROUTE,
+          resource: (request) => serveAudio(request),
+        }),
+      "hotlist: audio endpoint probe",
+    );
   });
 }
 
-export { apply, RING_ANIMS, RING_GIF_CATEGORIES, RING_ROUTE, RING_SCRIPT, RING_SCOPES, SOUND_ROUTE, ringArgs, ringCommand, serveRing, spawnRing };
+export { apply, AUDIO_ROUTE, AUDIO_SCRIPT, RING_ANIMS, RING_GIF_CATEGORIES, RING_ROUTE, RING_SCRIPT, RING_SCOPES, SOUND_ROUTE, ringArgs, ringCommand, serveAudio, serveRing, spawnAudioProbe, spawnRing };

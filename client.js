@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.2.1';
+    const VERSION = '5.3.0';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -236,7 +236,7 @@ window.__ModuleLoader__.load({
      */
     const CHOICE_SLOTS = ['glyph', 'glyphSecondary'];
     const CHOICE_FIELDS = ['value', 'motion', 'motionTarget', 'frequency'];
-    const CHOICE_KEY = /^(?:categories\.[a-z]+\.[a-zA-Z]+(?:\.[a-zA-Z]+)?|positions\.topbar|collect\.recentWindowMinutes|ring\.(?:pending|error|completed))$/;
+    const CHOICE_KEY = /^(?:categories\.[a-z]+\.[a-zA-Z]+(?:\.[a-zA-Z]+)?|positions\.topbar|collect\.recentWindowMinutes|ring\.(?:pending|error|completed)|audio\.smart)$/;
     /**
      * The three classes that can ring the whole screen. They are the same three
      * the band calls urgent; `running` and `idle` never take the screen away.
@@ -332,6 +332,10 @@ window.__ModuleLoader__.load({
     const SOUND_CATEGORIES = Object.keys(BUILTIN_SOUND);
     /** Two sounds closer than this are one event: the later one is dropped, never queued. */
     const SOUND_THROTTLE_MS = 1500;
+    /** How long one audio-endpoint probe stays usable; the warm loop refreshes on this cadence. */
+    const AUDIO_PROBE_TTL_MS = 60 * 1000;
+    /** Host route that answers "which device is the default output right now". */
+    const AUDIO_ROUTE = '/hotlist-audio';
     /** Physical code of the manual popout key; `shortcuts.overlayKey` is its display string. */
     const OVERLAY_CODE = 'KeyS';
 
@@ -417,6 +421,8 @@ window.__ModuleLoader__.load({
          * surprise from an upgrade.
          */
         ring: { pending: false, error: false, completed: false },
+        /** Smart audio: cue only while the default output device is headphones. */
+        audio: { smart: false },
         pinned: { maxSeats: PINNED_SEATS.fallback },
         /** Fields the user picked himself; anything absent here is still a factory preset. */
         choices: {},
@@ -684,7 +690,9 @@ window.__ModuleLoader__.load({
       'settings.ring.errorHint': '有会话这一轮失败时，整块屏幕提醒一次。',
       'settings.ring.completed': '有会话跑完时',
       'settings.ring.completedHint': '有会话刚结束时，整块屏幕提醒一次。',
-      'settings.ring.hint': '默认是整块屏幕上的透明动画（拍击或挥手，按类别自动挑），不是光圈；光圈仍在——那是脚本 -Anim Expand/Breathe/None 那条路，设了才用。提醒只显示几秒、不抢键盘焦点，点一下或按 Esc 立刻关；三个开关默认都关。',
+      'settings.audio.smart': '只在耳机时响',
+      'settings.audio.smartHint': '只有当前默认输出设备是耳机时才播提示音；不知道输出设备时不播。',
+      'settings.audio.needSetup': '需要初始化：首次使用会探测一次默认输出设备。',
       'settings.order': '顺序',
       'settings.orderHint': '1–99，数字越小越靠前。',
       'settings.takeOverStatusDotOff': '已停用：dsh-sessions-manager 的状态点将恢复显示。',
@@ -881,7 +889,9 @@ window.__ModuleLoader__.load({
       'settings.ring.errorHint': 'The whole screen reminds you once when a session fails its turn.',
       'settings.ring.completed': 'When a run finishes',
       'settings.ring.completedHint': 'The whole screen reminds you once when a session just finished.',
-      'settings.ring.hint': 'By default this is a transparent animation over the whole screen (tap or wave, picked by category), not a ring. The amber ring is still there — that is the script -Anim Expand/Breathe/None path, used only if you ask for it. The reminder shows for a few seconds, never takes keyboard focus, and a click or Esc closes it at once. All three switches start off.',
+      'settings.audio.smart': 'Headphones only',
+      'settings.audio.smartHint': 'Only plays cues while the default output device is headphones; unknown output stays silent.',
+      'settings.audio.needSetup': 'Needs setup: a first probe of the default output device runs on use.',
       'settings.order': 'Order',
       'settings.orderHint': '1–99, lower comes first.',
       'settings.takeOverStatusDotOff': 'Disabled: status dots from dsh-sessions-manager show again.',
@@ -1044,6 +1054,8 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           if (typeof patch.ring[category] === 'boolean') next[`ring.${category}`] = true;
         }
       }
+      /** The smart-audio switch is a user pick like the ring switches: a stored `true` survives presets. */
+      if (isPlainObject(patch.audio) && typeof patch.audio.smart === 'boolean') next['audio.smart'] = true;
       const categories = isPlainObject(patch.categories) ? patch.categories : {};
       for (const [category, change] of Object.entries(categories)) {
         if (CATEGORY_IDS.includes(category) === false || isPlainObject(change) === false) continue;
@@ -1280,6 +1292,9 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         for (const category of RING_CATEGORIES) {
           if (typeof raw.ring[category] === 'boolean') next.ring[category] = raw.ring[category];
         }
+      }
+      if (isPlainObject(raw.audio)) {
+        if (typeof raw.audio.smart === 'boolean') next.audio.smart = raw.audio.smart;
       }
       if (isPlainObject(raw.collect) && typeof raw.collect.completedTtlMs === 'number' && Number.isFinite(raw.collect.completedTtlMs)) {
         const minutes = clamp(Math.round(raw.collect.completedTtlMs / 60000), TTL_MINUTES.min, TTL_MINUTES.max);
@@ -1608,6 +1623,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         'collect.completedTtlMs', 'collect.recentWindowMinutes',
         'sound.volume', 'pinned.maxSeats',
         'ring.pending', 'ring.error', 'ring.completed',
+        'audio.smart',
       ]);
       for (const category of CATEGORY_IDS) {
         const base = `categories.${category}`;
@@ -1624,7 +1640,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     }
 
     function knownContainers() {
-      const containers = new Set(['positions', 'topbar', 'display', 'shortcuts', 'overlay', 'collect', 'sound', 'ring', 'pinned', 'categories']);
+      const containers = new Set(['positions', 'topbar', 'display', 'shortcuts', 'overlay', 'collect', 'sound', 'ring', 'audio', 'pinned', 'categories']);
       for (const category of CATEGORY_IDS) {
         containers.add(`categories.${category}`);
         for (const side of ['glyph', 'glyphSecondary', 'popout', 'sound']) containers.add(`categories.${category}.${side}`);
@@ -4144,7 +4160,8 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         switchRow('ring.pending', t('settings.ring.pending'), t('settings.ring.pendingHint'), settings.ring.pending === true, () => patch({ ring: { ...settings.ring, pending: settings.ring.pending !== true } })),
         switchRow('ring.error', t('settings.ring.error'), t('settings.ring.errorHint'), settings.ring.error === true, () => patch({ ring: { ...settings.ring, error: settings.ring.error !== true } })),
         switchRow('ring.completed', t('settings.ring.completed'), t('settings.ring.completedHint'), settings.ring.completed === true, () => patch({ ring: { ...settings.ring, completed: settings.ring.completed !== true } })),
-        h('p', { key: 'hint', className: 'hl-rowHint' }, t('settings.ring.hint')),
+        switchRow('audio.smart', t('settings.audio.smart'), t('settings.audio.smartHint'), settings.audio.smart === true, () => patch({ audio: { ...settings.audio, smart: settings.audio.smart !== true } })),
+        h('p', { key: 'audioNote', className: 'hl-rowHint' }, t('settings.audio.needSetup')),
       ]);
 
       const globalSection = () => h('section', { key: 'global', className: 'hl-global', 'data-hotlist-global': '' }, [
@@ -4979,14 +4996,63 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
      * `SOUND_THROTTLE_MS`. An autoplay refusal is logged once per event, silent
      * to the user.
      */
+    /**
+     * The smart-audio gate. Strict by design: a probe that is not a measured
+     * pair of headphones refuses the cue, so a wrong guess can never blast
+     * speakers. `probe` is `{ ...payload, at }` where `at` is when the client
+     * fetched it; a probe older than `AUDIO_PROBE_TTL_MS` is as good as none.
+     */
+    function audioGateAllowed(settings, probe, at) {
+      if (settings?.audio?.smart !== true) return { allow: true, reason: null };
+      if (probe === null || at - probe.at > AUDIO_PROBE_TTL_MS) return { allow: false, reason: 'audio-unknown' };
+      if (probe.state !== 'measured' || probe.error != null) return { allow: false, reason: 'audio-unknown' };
+      if (probe.kindGuess !== 'headphones') return { allow: false, reason: 'not-headphones' };
+      return { allow: true, reason: null };
+    }
+
     function createSoundPlayer(options) {
       const getSettings = options.getSettings;
       const createAudio = options.createAudio;
       const log = typeof options.log === 'function' ? options.log : () => {};
+      const fetchProbe = typeof options.fetchProbe === 'function' ? options.fetchProbe : null;
       /** sessionId -> category announced last round: re-entry replays, repaint does not. */
       const seen = new Map();
       let armed = false;
       let lastAt = -Infinity;
+      /** The last audio-endpoint answer and whether a refresh is already in flight. */
+      let audioProbe = null;
+      let probeBusy = false;
+
+      /** Ask the host once; a failure keeps the last answer (or null) so playback never waits. */
+      const refreshProbe = () => {
+        if (fetchProbe === null || probeBusy) return;
+        probeBusy = true;
+        fetchProbe().then((payload) => {
+          if (payload !== null && typeof payload === 'object' && typeof payload.kindGuess === 'string') {
+            audioProbe = { ...payload, at: Date.now() };
+          }
+        }).catch((thrown) => {
+          log('audio-probe-failed', thrown instanceof Error ? thrown.message : String(thrown));
+        }).finally(() => {
+          probeBusy = false;
+        });
+      };
+
+      /** Read-only status for the console probe: `{ smart, state, kindGuess, name, error, asOf, pass }`. */
+      const probeState = () => {
+        const settings = getSettings();
+        const at = Date.now();
+        const verdict = audioGateAllowed(settings, audioProbe, at);
+        return {
+          smart: settings?.audio?.smart === true,
+          state: audioProbe === null ? 'unknown' : audioProbe.state,
+          kindGuess: audioProbe === null ? 'unknown' : audioProbe.kindGuess,
+          name: audioProbe === null ? null : audioProbe.name ?? null,
+          error: audioProbe === null ? null : audioProbe.error ?? null,
+          asOf: audioProbe === null ? 0 : audioProbe.at,
+          pass: verdict.allow,
+        };
+      };
 
       const emit = (url, settings) => {
         const audio = createAudio(url);
@@ -5004,6 +5070,15 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         if (settings.categories[category]?.sound?.enabled !== true) {
           log('off', category);
           return false;
+        }
+        /** The smart gate runs before the throttle: a skipped cue must not consume the window. */
+        if (settings?.audio?.smart === true) {
+          const verdict = audioGateAllowed(settings, audioProbe, at);
+          if (verdict.allow === false) {
+            log('skip', verdict.reason);
+            if (audioProbe === null || at - audioProbe.at > AUDIO_PROBE_TTL_MS) refreshProbe();
+            return false;
+          }
         }
         if (at - lastAt < SOUND_THROTTLE_MS) {
           log('throttle', category, at - lastAt);
@@ -5071,7 +5146,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         }
       }
 
-      return { observe, preview };
+      return { observe, preview, prefetch: () => refreshProbe(), probeState };
     }
 
     /**
@@ -6780,10 +6855,18 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         sound = createSoundPlayer({
           getSettings: readSettings,
           createAudio: (url) => (typeof Audio === 'function' ? new Audio(url) : null),
+          fetchProbe: () => fetch(AUDIO_ROUTE, { headers: { 'x-hotlist-audio': '1' } })
+            .then((response) => (response.ok ? response.json() : null))
+            .catch(() => null),
           log: (...args) => console.debug('[hotlist] sound', ...args),
         });
         soundPreview = (category) => sound?.preview(category) === true;
+        /** Warm the probe once at boot and on the same cadence the host caches it. */
+        const warm = () => { if (readSettings().audio?.smart === true) sound?.prefetch(); };
+        warm();
+        const audioTimer = setInterval(warm, AUDIO_PROBE_TTL_MS);
         return () => {
+          clearInterval(audioTimer);
           sound = null;
           soundPreview = () => false;
         };
@@ -6902,6 +6985,8 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             onSettingsChange,
             preview: (category) => soundPreview(category),
           }),
+          /** Read-only audio-endpoint probe; `null` before the sound effect mounts. */
+          audio: () => (sound === null ? null : sound.probeState()),
           /** Read-only probe for the acceptance run; see `docs/ARCHITECTURE.md` §18. */
           topbar: () => ({
             mounted: topbarEntry !== null,
@@ -7035,6 +7120,9 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       BUILTIN_SOUND,
       SOUND_CATEGORIES,
       createSoundPlayer,
+      audioGateAllowed,
+      AUDIO_PROBE_TTL_MS,
+      AUDIO_ROUTE,
       createRingPlayer,
       RING_CATEGORIES,
       RING_OPTIONS,

@@ -3,7 +3,7 @@
 This file is for AI coding agents. It says what this plugin already does, so you
 do not rebuild it, and what will break the host if you get it wrong.
 
-- Package: `dsh-better-notice` · version `5.2.1` · MIT
+- Package: `dsh-better-notice` · version `5.3.0` · MIT
 - Host: DeepSeek Harness (DSH) Web UI
 - One command to install: `dsh plugin --profile <profile> add dsh-better-notice`
 - One-page summary for scrapers: [llms.txt](llms.txt) · human docs: [README.md](README.md)
@@ -20,11 +20,11 @@ finished, which one failed.
 
 | Surface | What you see | Where the code lives |
 |---|---|---|
-| Conversation tab row | one tab seat per hot session; click switches to it | `mountTabSeats` (`client.js:5592`) |
-| Left session sidebar | one glyph before each row title, optionally animated | `createSidebarAdapter` / `sidebarStateOf` (`client.js:2998` / `2955`) |
-| Window top bar (**Windows desktop**, new in v5) | a row of session pills in the 40 px title strip, next to the tab row | `mountTopbar` (`client.js:6288`) |
-| On state change | a sound and/or a popout picture | `createSoundPlayer` (`client.js:4982`) · `mountPopout` (`client.js:4427`) |
-| On state change (**opt-in**) | a super-reminder clip (or the older amber ring), drawn by a separate process | `createRingPlayer` (`client.js:5085`) · `serveRing` (`index.js:167`) |
+| Conversation tab row | one tab seat per hot session; click switches to it | `mountTabSeats` (`client.js:5667`) |
+| Left session sidebar | one glyph before each row title, optionally animated | `createSidebarAdapter` / `sidebarStateOf` (`client.js:3014` / `2955`) |
+| Window top bar (**Windows desktop**, new in v5) | a row of session pills in the 40 px title strip, next to the tab row | `mountTopbar` (`client.js:6363`) |
+| On state change | a sound and/or a popout picture | `createSoundPlayer` (`client.js:5013`) · `mountPopout` (`client.js:4444`) |
+| On state change (**opt-in**) | a super-reminder clip (or the older amber ring), drawn by a separate process | `createRingPlayer` (`client.js:5160`) · `serveRing` (`index.js:167`) |
 
 **Who is drawn where** (`buildSeatPlan()` takes a `surface` argument): `error` /
 `pending` / `completed` go to the window top bar, `pinned` / `idle` go to the tab
@@ -47,8 +47,8 @@ error  >  pending  >  completed  >  running  >  pinned  >  idle
 | `pinned` | pinned **in the host's own UI** — read from `pinnedSessionIds`, never stored by this plugin | no | — |
 | `idle` | active within the global recent window | no | — |
 
-The two functions that decide this are `classify()` (`client.js:2087-2145`) and
-`sidebarStateOf()` (`client.js:2960-2996`). They share the same order but apply
+The two functions that decide this are `classify()` (`client.js:2103-2161`) and
+`sidebarStateOf()` (`client.js:2976-3012`). They share the same order but apply
 different extra conditions (the sidebar has an error TTL and honours
 `completionUnread`). Change both, or you get two different answers for the same
 session on two surfaces.
@@ -60,10 +60,10 @@ session on two surfaces.
 from the tail — the priority head always survives. `plan.overflow` reports how
 many were dropped.
 
-**Settings are never overwritten.** `sanitizeSettings()` (`client.js:1197`) is
+**Settings are never overwritten.** `sanitizeSettings()` (`client.js:1209`) is
 pure and falls back per field, never wholesale. Unknown keys go to
 `PRESERVED_KEY` (`client.js:169`) and come back on the next read; out-of-range
-values come back too (`outOfRangeOf`, `client.js:1697`); the last five writes
+values come back too (`outOfRangeOf`, `client.js:1713`); the last five writes
 are kept as a rolling backup ring under `BACKUP_KEY` (`client.js:171`,
 `BACKUP_LIMIT = 5`). There is deliberately **no `SETTINGS_VERSION` bump** for
 cosmetic changes — a version bump means writing a migration, and a wrong
@@ -74,7 +74,7 @@ equals a default an earlier release shipped — `💤` for the idle glyph,
 `blink`/`none` motion, `motionTarget: 'glyph'`, frequency `1`, sound off — is
 not a user choice, so it follows the current default (`LEGACY_VALUES`,
 `client.js:214`). A value the user actually picked is recorded in `choices`
-(`client.js:1972`, written by `writeSettings()` from the incoming patch
+(`client.js:1988`, written by `writeSettings()` from the incoming patch
 only) and the preset rule never touches it; `resetSettings()` clears the map.
 
 ---
@@ -126,9 +126,10 @@ authenticated** — publish public assets only, never user data.
 
 ```js
 window.__HOTLIST__ = {
-  version,                                              // "5.2.1"
+  version,                                              // "5.3.0"
   settings: { get, set, reset, subscribe, backups, restore },
   assets:   { add, list, clear, preview },
+  audio,                                                // read-only headphone-gate probe
 };
 ```
 
@@ -143,8 +144,12 @@ window.__HOTLIST__ = {
   `kind` ∈ `glyph | popout | sound`; `reason` ∈ `invalid | full | refused | budget`.
 - `assets.list(category, kind)` → `[{name, bytes}]`.
 - `assets.clear(category, kind)` → boolean.
-- `assets.preview(category)` → plays the sound for that category now
-  (bypasses the cold-start gate and the 1500 ms throttle).
+- `assets.preview(category)` → plays the sound for that category now. Bypasses the
+  cold-start gate, the 1500 ms throttle **and the headphones gate** — it is a user
+  click, so it must always be audible even on speakers.
+- `audio()` → `{ smart, state, kindGuess, name, error, asOf, pass }`, or `null` before
+  the sound player mounts. `pass` is what the gate would answer right now; switch off
+  → always `true`. Use it instead of guessing why a cue went silent.
 - `topbar()` → read-only probe: `{ mounted, mode, titleMode, left, leftSource,
   measured, reserve, currentId, capacity, chips }`.
 - `export(opts)` → session list as `md` | `txt` | `json`; explicit `ids` win over
@@ -172,7 +177,7 @@ name never renders two emoji.
 
 ```
 client.js              web half — everything the UI does (single file, ~7.1k lines)
-index.js               host half — registers /hotlist-sound and /hotlist-ring
+index.js               host half — registers /hotlist-sound, /hotlist-ring, /hotlist-audio
 cordis.patch.yml       one insert line that mounts the plugin
 package.json           name / version / files / dsh.{bundle,client}
 locale/{en,zh}.json    display name + description the host plugin list reads
@@ -181,9 +186,10 @@ assets/                error|pending|completed × 4 **static** webp tiers (681 K
 assets/sounds/         attention.wav, complete.wav (+ their manifest)
 docs/ARCHITECTURE.md   layering, state model, settings schema, line-number index
 docs/EXTENDING.md      API surface + how to extend without breaking data
-docs/TESTING.md        the 112 test groups, each with its source line
+docs/TESTING.md        the 115 test groups, each with its source line
 test/classify.test.mjs the whole self-test (pure node, no browser)
 tools/attn-ring/       super-reminder script + media/{smack,wave}.gif + build-media.py — SHIPS in the package
+tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell) — SHIPS in the package
 tools/meru-tts/        optional TTS helper; repo only, NOT in the package (~1.6 MB)
 ```
 
@@ -193,7 +199,7 @@ tools/meru-tts/        optional TTS helper; repo only, NOT in the package (~1.6 
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs      # expect: PASS — 112 groups
+node test/classify.test.mjs      # expect: PASS — 115 groups
 ```
 
 `node --check` alone is not enough: a deleted-but-still-referenced constant is
@@ -250,14 +256,21 @@ Git may not be under `C:\Program Files\Git`. Ask the tool itself:
    an overlay a background there.
 6. `settings.pins` is dead weight kept for read compatibility only — pinning now
    comes from the host's `pinnedSessionIds`.
-7. **The super reminder is Windows-only.** It is a WPF window started by PowerShell
+7. **The headphones gate (`audio.smart`) is strict and Windows-only.** With it on, a
+   cue plays only when a probe *measured* the default output as headphones. Probe
+   failed, timed out, no `pwsh`, not Windows → **silent**, by design. `audio()` tells
+   you which of those you hit. The gate covers **automatic** cues only: the ▶ preview
+   in Settings always plays, because a user must be able to test a sound on speakers.
+   A cue refused by the gate does **not** consume the 1500 ms throttle window (the
+   gate is checked before the throttle in `play()`).
+8. **The super reminder is Windows-only.** It is a WPF window started by PowerShell
    (`tools/attn-ring/Show-AttnRing.ps1`); on other platforms the switches save but
    nothing rises. It covers the primary screen only (`-Scope Primary`), and all three
    switches ship off — default silence is the point of that feature. The default look
    is a transparent animated clip (`anim=Gif`, `smack.gif` for `error`/`pending`,
    `wave.gif` for `completed`, 320×320, no backdrop); `Expand` / `Breathe` / `None`
    still draw the amber ring, and a missing or undecodable clip falls back to it.
-8. `hideNativeDot`, `shortcuts.*` and `overlay.size` still exist as fields but
+9. `hideNativeDot`, `shortcuts.*` and `overlay.size` still exist as fields but
    have no settings-page row. Their behaviour is unchanged; only the UI is gone.
 
 ## 7. Bundled artwork is a placeholder, and that is on purpose

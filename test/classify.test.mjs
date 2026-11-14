@@ -4719,5 +4719,132 @@ test('a gif ring reaches the script with its clip, and other animations stay unt
   }
   assert.equal(host.RING_GIF_CATEGORIES.join(','), 'error,pending,completed', 'only the three urgent classes have a clip');
 });
+﻿﻿// 113. The smart-audio switch: off by default, marked as a user pick when written,
+// and a strict headphones-only gate when on.
+test('the audio gate is off by default and only lets headphones through', async () => {
+  const settings = api.sanitizeSettings(api.defaultSettings());
+  assert.deepEqual(settings.audio, { smart: false }, 'the factory shape is one switch, off');
+
+  /** A stored true is the user's pick and survives presets; junk falls back. */
+  const picked = api.sanitizeSettings({ audio: { smart: true } });
+  assert.equal(picked.audio.smart, true);
+  api.writeSettings({ audio: { smart: true } });
+  assert.equal(api.readSettings().audio.smart, true, 'a smart-audio write lands in storage');
+  assert.equal(api.readSettings().choices['audio.smart'], true, 'the switch is marked as a user pick');
+  assert.equal(api.sanitizeSettings({ audio: { smart: 'yes' } }).audio.smart, false, 'a non-boolean falls back');
+  api.resetSettings();
+
+  /** The gate itself, pure: anything unknown or non-headphones refuses. */
+  const now = 1_800_000_000_000;
+  const gateOn = api.sanitizeSettings({ audio: { smart: true } });
+  assert.deepEqual(api.audioGateAllowed(gateOn, null, now), { allow: false, reason: 'audio-unknown' });
+  assert.deepEqual(api.audioGateAllowed(gateOn, { state: 'measured', kindGuess: 'speakers', error: null, at: now }, now), { allow: false, reason: 'not-headphones' });
+  assert.deepEqual(api.audioGateAllowed(gateOn, { state: 'measured', kindGuess: 'headphones', error: null, at: now }, now), { allow: true, reason: null });
+  assert.deepEqual(api.audioGateAllowed(gateOn, { state: 'unknown', kindGuess: 'unknown', error: null, at: now }, now), { allow: false, reason: 'audio-unknown' });
+  assert.deepEqual(api.audioGateAllowed(gateOn, { state: 'measured', kindGuess: 'headphones', error: 'boom', at: now }, now), { allow: false, reason: 'audio-unknown' });
+  assert.deepEqual(api.audioGateAllowed(gateOn, { state: 'measured', kindGuess: 'headphones', error: null, at: now - api.AUDIO_PROBE_TTL_MS - 1 }, now), { allow: false, reason: 'audio-unknown' }, 'a stale probe is as good as none');
+  const off = api.sanitizeSettings({ audio: { smart: false } });
+  assert.deepEqual(api.audioGateAllowed(off, null, now), { allow: true, reason: null }, 'the gate is a no-op while the switch is off');
+
+  /** The player honours the gate before the throttle: a skipped cue consumes nothing. */
+  const plays = [];
+  const logs = [];
+  const probes = [{ state: 'measured', kindGuess: 'speakers', name: 'Theatre', error: null }];
+  const player = api.createSoundPlayer({
+    getSettings: () => api.sanitizeSettings({ audio: { smart: true }, categories: { pending: { sound: { enabled: true } } } }),
+    createAudio: (url) => ({ url, volume: 1, play() { plays.push(url); return Promise.resolve(); } }),
+    log: (...args) => logs.push(args.join(' ')),
+    fetchProbe: async () => probes.shift() ?? null,
+  });
+  await player.prefetch();
+  const shot = (id, at) => ({
+    list: { ids: [id], byId: { [id]: session({ id }) } },
+    statuses: new Map([[id, { pendingInteraction: { kind: 'approval' } }]]),
+    errors: new Map(),
+    completedAt: new Map(),
+  });
+  player.observe(shot('a', 1000), 1000);
+  assert.equal(plays.length, 0, 'the opening sync only arms');
+  player.observe(shot('gone', 2000), 2000);
+  player.observe(shot('a', 3000), 3000);
+  assert.equal(plays.length, 0, 'speakers refuse the cue');
+  assert.equal(logs.includes('skip not-headphones'), true, 'the refusal is logged with its reason');
+
+  const headphones = api.createSoundPlayer({
+    getSettings: () => api.sanitizeSettings({ audio: { smart: true }, categories: { pending: { sound: { enabled: true } } } }),
+    createAudio: (url) => ({ url, volume: 1, play() { plays.push(url); return Promise.resolve(); } }),
+    log: (...args) => logs.push(args.join(' ')),
+    fetchProbe: async () => ({ state: 'measured', kindGuess: 'headphones', name: 'Headset', error: null }),
+  });
+  await headphones.prefetch();
+  headphones.observe(shot('b', 3000), 3000);
+  headphones.observe(shot('gone', 4000), 4000);
+  headphones.observe(shot('b', 5000), 5000);
+  assert.equal(plays.length, 1, 'headphones let the cue through');
+
+  /** Unknown output stays silent, and the switch off plays regardless of the probe. */
+  const unknown = api.createSoundPlayer({
+    getSettings: () => api.sanitizeSettings({ audio: { smart: true }, categories: { pending: { sound: { enabled: true } } } }),
+    createAudio: (url) => ({ url, volume: 1, play() { plays.push(url); return Promise.resolve(); } }),
+    log: (...args) => logs.push(args.join(' ')),
+    fetchProbe: async () => null,
+  });
+  await unknown.prefetch();
+  unknown.observe(shot('c', 5000), 5000);
+  unknown.observe(shot('gone', 6000), 6000);
+  unknown.observe(shot('c', 7000), 7000);
+  assert.equal(plays.length, 1, 'an unmeasured probe refuses the cue');
+  assert.equal(logs.includes('skip audio-unknown'), true);
+
+  const lax = api.createSoundPlayer({
+    getSettings: () => api.sanitizeSettings({ categories: { pending: { sound: { enabled: true } } } }),
+    createAudio: (url) => ({ url, volume: 1, play() { plays.push(url); return Promise.resolve(); } }),
+    log: (...args) => logs.push(args.join(' ')),
+    fetchProbe: async () => ({ state: 'measured', kindGuess: 'speakers', error: null }),
+  });
+  lax.observe(shot('d', 7000), 7000);
+  lax.observe(shot('gone', 8000), 8000);
+  lax.observe(shot('d', 9000), 9000);
+  assert.equal(plays.length, 2, 'the switch off never consults the probe');
+  assert.equal(plays[1], '/hotlist-sound/attention.wav');
+});
+
+// 114. The ring hint line is gone; the audio switch and its setup note take its place.
+test('the ring hint is gone and the audio switch takes its place', () => {
+  for (const marker of ["'settings.ring.hint':"]) {
+    assert.equal(source.includes(marker), false, 'the ring hint key is gone from the dictionary');
+  }
+  assert.equal(source.includes("'settings.audio.smart':"), true);
+  assert.equal(source.includes("'settings.audio.needSetup':"), true);
+
+  const { harness, page } = renderPage();
+  try {
+    const rows = collect(page, (props) => typeof props['data-hotlist-row'] === 'string')
+      .map((node) => node.props['data-hotlist-row']);
+    assert.equal(rows.includes('audio.smart'), true, 'the smart-audio switch is a real row');
+    for (const key of ['ring.pending', 'ring.error', 'ring.completed']) {
+      assert.equal(rows.includes(key), true, 'the ring switches stay');
+    }
+    const notes = collect(page, (props) => props.key === 'audioNote').map((node) => textOf(node));
+    assert.equal(notes.includes('settings.audio.needSetup'), true, 'the setup note renders next to the switch');
+    const hintTexts = collect(page, (props) => props.className === 'hl-rowHint').map((node) => textOf(node));
+    assert.equal(hintTexts.includes('settings.ring.hint'), false, 'no leftover hint text');
+  } finally {
+    harness.cleanup();
+  }
+});
+
+// 115. The scripting surface exposes a read-only audio probe; boot warms it only when smart is on.
+test('the audio probe is scriptable and answers before any probe has run', async () => {
+  const { harness } = renderPage();
+  try {
+    const audio = win.__HOTLIST__.audio();
+    assert.equal(typeof audio, 'object', 'audio() answers before any probe');
+    assert.equal(audio.smart, false, 'the default switch is off');
+    assert.equal(audio.pass, true, 'with the switch off the gate never blocks');
+  } finally {
+    harness.cleanup();
+  }
+});
 
 console.log(`PASS — ${groups} groups`);

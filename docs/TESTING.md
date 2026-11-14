@@ -9,7 +9,7 @@ cd <你的克隆目录>            # 含 client.js / index.js / test/ 的那一�
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs       # 期望最后一行: PASS — 112 groups，exit 0
+node test/classify.test.mjs       # 期望最后一行: PASS — 115 groups，exit 0
 ```
 
 `node --check` 是必须的：`client.js` 是包在 `window.__ModuleLoader__.load({factory})` 里的单文件脚本，语法错只在真机 boot 时才炸。
@@ -26,7 +26,7 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 
 `test/classify.test.mjs` 不用 import：它 stub 一个 `window.__ModuleLoader__.load` 抓住 factory，再 `new Function(source)()` 执行**真实的 client.js 源文件**，拿回模块的导出（`classify`、`sortSeats`、`buildSeatPlan`、`sanitizeSettings`、`migrateSettings`、`createSidebarAdapter`…）。所以测的是真代码，假的是浏览器环境：`document` / `localStorage` / `React` / cordis `ctx`。
 
-### 1.2 112 组各测什么
+### 1.2 115 组各测什么
 
 | 组 | 位置 | 覆盖 |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 | adapter sidebar pinned and children | `test:1194` | 侧栏看到与 tab 一样的信息：置顶会话出 📌、有子会话在跑时父会话出 ⏳ |
 | takeover gate | `test:1226` | `takeOverStatusDot:true` 时 `[data-hotlist-style="takeover"]` 恰好 1 个且 dsm 点 `display:none`；改成 `false` 后 style 块被移除、点的 inline `display` 还原成 `''` |
 | styles stay valid | `test:1257` | 所有注入的样式文本不含 `[[`（二次包裹的选择器），`stop()` 后 `[data-hotlist-style]` 一个不剩 |
-| settings page | `test:1293` | section 注册 `[['hotlist',30]]`、label「热表」、页根 `data-hotlist-settings="v5.2.1"`；全局区行键齐（`maxSeats`/`pinned.maxSeats`/`collect.completedTtlMs`/`sound.volume`/`recentWindow`/`positions.tab`/`positions.topbar`/`takeOverStatusDot`）；**6 张卡**按 order 排 `error,pending,pinned,completed,running,idle`；折叠态 **30 个 chip**（6×5，其中 6 个是 topbar 位：`data-disabled="true"` + `data-on="false"`，位置 chip 的 `title` 是 `settings.chip.positionHint`）；`hideNativeDot`/`shortcuts.*`/`reset`/`within`/`overlay.size` 五类行**不存在**；`categories.favorite` **不存在**；`window.__HOTLIST__.assets.add(...,'nope',...)` 返回 `reason:'invalid'` |
+| settings page | `test:1293` | section 注册 `[['hotlist',30]]`、label「热表」、页根 `data-hotlist-settings="v5.3.0"`；全局区行键齐（`maxSeats`/`pinned.maxSeats`/`collect.completedTtlMs`/`sound.volume`/`recentWindow`/`positions.tab`/`positions.topbar`/`takeOverStatusDot`）；**6 张卡**按 order 排 `error,pending,pinned,completed,running,idle`；折叠态 **30 个 chip**（6×5，其中 6 个是 topbar 位：`data-disabled="true"` + `data-on="false"`，位置 chip 的 `title` 是 `settings.chip.positionHint`）；`hideNativeDot`/`shortcuts.*`/`reset`/`within`/`overlay.size` 五类行**不存在**；`categories.favorite` **不存在**；`window.__HOTLIST__.assets.add(...,'nope',...)` 返回 `reason:'invalid'` |
 | settings page card order | `test:1362` | 改 `categories.error.order = 5` 后卡片顺序是 `error,pending,pinned…`（error 与 pending 同为 10，按 `CATEGORY_ORDER` 兜底），末位 `idle` |
 | settings page overflow notice | `test:1376` | v4.4 删掉了提示条：`publishOverflow`/`currentOverflow`/`onOverflowChange` 都不再导出、页面无 `[data-hotlist-overflow]`、文案里没有 `settings.overflow`；但 `plan.overflow` 的数字仍在（`limit:1` + 3 行 → `overflow===2`） |
 | settings upload gate | `test:1397` | `glyphUploadReject`：`null`→`missing`、svg→`type`、**gif 放行**、webp 5 MB→`size`；超限 data URL 在 `sanitizeSettings` 里回落 `emoji` 且 `value:''`。上传是**两道闸**：源文件大小与产物（重编码后）大小 |
@@ -142,6 +142,9 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 | host ring: script arguments and no-pwsh safety | `test:4539` | 宿主半边三道闸：参数夹取（`seconds` 夹到 1–30、`scope`/`anim` 白名单）、`spawn` 必须挂 `child.on('error')`（不挂会打死 host）、脚本真的在包里（`files` 含 `tools/attn-ring` 且**不含** `tools`）且在磁盘上（`RING_SCRIPT` 可解析） |
 | the super reminder ships two clips, and the popout art is back to static | `test:4674` | 随包素材分家：`assets/manifest.json` 的 `total_webp_bytes` 是 **681462**（静态图那套），三类 × 四档逐条与磁盘字节相等、且每档 `px` 就是档位本身（不是把 500 px 动画缩下来）；光圈用的两段动画改放 `tools/attn-ring/media/`：`smack.gif` 10 帧、`wave.gif` 11 帧，都是 320×320 的 `GIF89a`、单份 <450 KiB 的包体预算 |
 | a gif ring reaches the script with its clip, and other animations stay untouched | `test:4703` | `ringArgs('seconds=4&anim=gif&cat=completed')` → `{seconds:4, scope:'Primary', anim:'Gif', gifCategory:'completed'}`，`ringCommand()` 的 `-Anim Gif` / `-GifCategory completed` 都到位；非法 `cat`（`<script>`）回落 `pending`、不会进 shell；`anim=Expand` 时 `cat` 被忽略、`-GifCategory` 根本不出现；`Expand`/`Breathe`/`None` 仍在白名单里 |
+| the audio gate is off by default and only lets headphones through | `test:4724` | 「只在耳机时响」的出厂形状是 `audio: { smart: false }`（**一个开关、默认关**）；写 `{ smart: true }` 落盘且被打上 `choices['audio.smart']`（出厂预设改不动它），非布尔值回落 `false`；纯函数 `audioGateAllowed` 六态逐条：开关关 → 一律放行（不看探测）、探测为 `null` → `audio-unknown`、`measured`+`speakers` → `not-headphones`、`measured`+`headphones` → 放行、`state:'unknown'` → `audio-unknown`、`error` 非空 → `audio-unknown`、超过 `AUDIO_PROBE_TTL_MS` 的旧探测视同没有；player 层三条：喇叭时**不播**且 console 记 `skip not-headphones`、耳机时放行、探测不出来时**不播**并记 `skip audio-unknown`；最后一条证明「开关关掉时绝不查探测」（探测是扬声器也照播） |
+| the ring hint is gone and the audio switch takes its place | `test:4813` | 源码里 `'settings.ring.hint':` 这个键**已不存在**，`'settings.audio.smart':` 与 `'settings.audio.needSetup':` 存在；渲染出来的页面里 `data-hotlist-row="audio.smart"` 是真行、`ring.pending` / `ring.error` / `ring.completed` 三行仍在（只删说明行、没删开关）；`key === 'audioNote'` 的节点文本是 `settings.audio.needSetup`（初始化提示挂在开关下一行），且页面上没有任何 `hl-rowHint` 还写着 `settings.ring.hint` |
+| the audio probe is scriptable and answers before any probe has run | `test:4838` | `window.__HOTLIST__.audio()` 在任何探测发生**之前**就能调用并返回对象：`smart` 为 `false`（默认关）、`pass` 为 `true`（开关关着时门禁从不拦），以及 `state` / `kindGuess` / `name` / `error` / `asOf` 五个只读字段的形状 |
 
 ### 1.3 改测试时踩过的坑（照抄结论）
 
@@ -182,9 +185,10 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 - dsm 状态点顶替与还原（需要另一个插件真的在画点）。
 - 动效观感：`motionTarget:'row'`、`reduceMotion`、每类的「播放频率」（0–100% 滑块）与常驻预览——只能人眼看；`row` 目标现在带 1–2px 位移，标题应该看得出在动。
 - 设置页外观：token 是否在深色主题下正确、559px 内是否横向滚动、上传真实文件时 canvas/webp 是否可用；折叠态一张卡 ≈44px、展开态「置顶」卡 ≤520px（v4.4 真机：44 / 514 / 466；v4.5 少了全局区一行与 i18n 两键，v4.6.2 又删掉了「收藏」整类，卡片只剩 6 张，整体只会更矮）。
-- 设置页结构与版本标记（验收脚本靠它们一击命中）：页根 `data-hotlist-settings` 期望值是 **`v5.2.1`**；卡片 **6 张**（`error` / `pending` / `pinned` / `completed` / `running` / `idle`，4.6.2 起「收藏」整类已删）；折叠态 chip 共 **30 个**（6 卡 × 5），其中 6 个是 topbar 位（`data-disabled="true"` + `data-on="false"`）；全局区 8 行 `[data-hotlist-row]` = `maxSeats` / `pinned.maxSeats` / `collect.completedTtlMs` / `sound.volume` / `recentWindow` / `positions.tab` / `positions.topbar` / `takeOverStatusDot`。
+- 设置页结构与版本标记（验收脚本靠它们一击命中）：页根 `data-hotlist-settings` 期望值是 **`v5.3.0`**；卡片 **6 张**（`error` / `pending` / `pinned` / `completed` / `running` / `idle`，4.6.2 起「收藏」整类已删）；折叠态 chip 共 **30 个**（6 卡 × 5），其中 6 个是 topbar 位——**v5 起它们是活的**（`data-disabled="false"`，出厂 `error`/`pending`/`completed` 三张卡的 topbar 位 `data-on="true"`），不再是 4.x 的灰块；全局区必须有的 `[data-hotlist-row]` = `scope` / `maxSeats` / `pinned.maxSeats` / `collect.completedTtlMs` / `sound.volume` / `recentWindow` / `positions.tab` / `positions.topbar` / `takeOverStatusDot`，`positions.topbar` 打开时再多三行（`topbar.chipWidthPct` / `topbar.titleMode` / `topbar.customScope`）；超级提醒是**独立一组**（`[data-hotlist-ring]` 恰好 1 个，组标题 `settings.group.ring`）里三行 `ring.pending` / `ring.error` / `ring.completed`，同一组还有 `audio.smart` 一行 + 它下面的 `audioNote` 提示（`p`，不是 row）。
 - 置顶走宿主原生：置顶来自宿主快照 `pinnedSessionIds`（侧栏行 hover 的「置顶会话」按钮），`settings.pins` 已在 **4.6.0 废弃**、读时丢弃，设置页也没有上移/下移/取消置顶；插件只提供全局「置顶最多显示」`pinned.maxSeats`（0–12，默认 3，0 = 不显示置顶）。真机上置顶/取消置顶后座位应在两轮 `tick()` 内跟着变。
 - 「最近对话展示时间」在 5.1.8 之后**不再是两层范围**：设置页数字框给 **1–120** 分钟（`RECENT_WINDOW_UI`，`client.js:307`），与存储层上界一致（`RECENT_WINDOW_MINUTES`，`client.js:302`，`0`–`120`，默认 **17**；`0` = 不显示 idle）。仍要两只手都验：页面拖到 `1` 和 `120` 都要能落盘；走 API `window.__HOTLIST_SETTINGS__.set({ collect: { recentWindowMinutes: 0 } })` 也合法（只有页面不提供 0），重载后仍是 0。
+- 耳机门禁（v5.3 新增，`audio.smart`）：开着它、且默认输出是**音箱**时，让某个会话进 `pending` 或 `completed`——**必须没有提示音**（console 有 `skip not-headphones`）；把默认输出切到耳机再来一次，**必须响**。切完后**不要点任何按钮**，等 60 秒以上再触发一次，应自动跟上（客户端按 `AUDIO_PROBE_TTL_MS` 自己重探）。`window.__HOTLIST__.audio()` 应依次给出 `{ smart:true, state:'measured', kindGuess:'speakers', pass:false }` → `kindGuess:'headphones', pass:true`。顺手验两条宿主闸门：控制台 `await fetch('/hotlist-audio')`（**不带** `x-hotlist-audio: 1`）应返回 **403 `no-marker`**；带上头再连发两次，60 秒内第二次应命中缓存（`cached: true`，不再起子进程）。另外验那条容易误以为坏了的行为：**设置页点 ▶ 试听，无论接音箱还是耳机都必须响**（它不走门禁）；以及被门禁拒掉的那一次**不消耗** 1500 ms 节流窗口——拒掉后立刻切到耳机再触发，应该马上响而不是等一秒。
 - 浮层：真的会在「别的会话进入 error/pending/completed」时弹出来、位置在正确一侧（auto 时看左侧会话栏宽度）、点到图上会切到那个会话、超时自己收回且收回后 DOM 里没有残留节点。
 - 浮层的观感：clip 揭示的入场、breath/float 的待机、drop/particles 的退场，以及 `reduceMotion` 时是否只剩 120ms 淡入——单测只能证明属性写对了。
 - 离线/缺素材时的回落：删掉某个 `assets/<cat>-<tier>.webp` 后应回落到同名 `.svg`，再删 `.svg` 应回落 emoji，console 里有 `[hotlist] popout` 的 fallback 日志。
@@ -195,7 +199,7 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 
 1. `node --check client.js index.js test/classify.test.mjs`。
 2. `node cangku/tmp/261111_gate_pre_restart.mjs` → `STATIC VERDICT: clean`（查未声明常量、已删字段、新字段与模块形状；`node --check` 抓不到「引用一个没人声明的常量」这类崩溃）。
-3. `node test/classify.test.mjs` → `PASS — 112 groups`。
+3. `node test/classify.test.mjs` → `PASS — 115 groups`。
 4. 如果碰了排序：断言「同一批会话只变 `updatedAt` → registry 变更数不增加」（组 `adapter plan`），否则 tab 会每 30s 抖一次。
 5. 如果碰了注册/注销：断言座位 id 仍带 `hotlist-seat-` 前缀、`stop()` 后无残留节点/属性/样式（组 `adapter sidebar markers`、`surface gating`）。
 6. 如果碰了 CSS：断言所有样式文本不含 `[[`，且 takeover 规则只出现在 `data-hotlist-style="takeover"` 的 `<style>` 里（组 `takeover gate`、`styles stay valid`）。

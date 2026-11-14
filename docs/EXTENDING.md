@@ -34,7 +34,7 @@ api.lastError()        // 最近一次写盘错误（字符串或 null）
 ```
 
 同一对象也挂在旧名 `window.__SESSION_SWITCHER_SETTINGS__`（v2.x 兼容，别在新代码里用）。
-插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.2.1'`）。
+插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.0'`）。
 
 写设置后不需要刷新页面：tab、侧栏、设置页都在同一个 store 上重算。
 
@@ -58,6 +58,7 @@ window.__HOTLIST__ = {
     preview(category),           // 立刻播一条该类别池里的音效（试听），返回是否播放
   },
   topbar(),                    // 只读探针：顶栏当前状态，见下面「顶栏探针」
+  audio(),                     // 只读探针：耳机门禁此刻的判定，见 §2 的 audio.smart
   export(opts),                // 导出会话清单，见 §10
 };
 ```
@@ -106,7 +107,7 @@ window.__HOTLIST__.topbar();
 
 存储键 `dsh.hotlist.settings.v1`（v2.x 旧键 `dsh.session-switcher.settings` 会自动迁移并删除）。
 
-下面所有字段在 v5.0.0-alpha.1 都已落地：v4.1.0 只有单图/占位音效种类，v4.2.0 把它们换成了素材池，v4.4.0 把动效间隔换成播放频率、把收录窗口搬到全局，v4.5.0 删掉弹出图尺寸的 UI（`overlay.sizeMin/sizeMax` 仍是 API 字段）并把内置音效固定成两个 wav，v4.6.0 置顶改读宿主原生并删掉 `settings.pins`，v4.6.1 删掉第 7 类 `favorite` 并把「最近对话展示时间」的 UI 收窄到 1–36 分钟，v5.0.0-alpha.1 加了窗口顶栏（`positions.topbar` 默认 **true**）、`scope`、`topbar.*`、`choices`，并把 `pinned` 的默认顺序改成 **60**（读旧记录时缺字段一律回落默认，不会报错）。
+下面所有字段在 v5.3.0 都已落地：v4.1.0 只有单图/占位音效种类，v4.2.0 把它们换成了素材池，v4.4.0 把动效间隔换成播放频率、把收录窗口搬到全局，v4.5.0 删掉弹出图尺寸的 UI（`overlay.sizeMin/sizeMax` 仍是 API 字段）并把内置音效固定成两个 wav，v4.6.0 置顶改读宿主原生并删掉 `settings.pins`，v4.6.1 删掉第 7 类 `favorite` 并把「最近对话展示时间」的 UI 收窄到 1–36 分钟，v5.0.0-alpha.1 加了窗口顶栏（`positions.topbar` 默认 **true**）、`scope`、`topbar.*`、`choices`，并把 `pinned` 的默认顺序改成 **60**；v5.2 加了 `ring.*` 三开关；v5.3 加了 `audio.smart`（耳机门禁，默认 `false`）（读旧记录时缺字段一律回落默认，不会报错）。
 
 ```js
 {
@@ -136,6 +137,9 @@ window.__HOTLIST__.topbar();
   ring: { pending: false, error: false, completed: false },  // v5.2 新增：超级提醒三开关，出厂全关；只有 Windows 有效
                                   // 默认长相是透明动画（anim=Gif，smack/wave），琥珀光环是可选档
                                 // 开了的存在 choices 里，所以出厂预设规则不会把它们关回去
+  audio: { smart: false },     // v5.3 新增：严格耳机门禁。开了只有探测到默认输出是耳机才播
+                               // 「不知道」也算拒绝（探测失败/超时/没 pwsh/非 Windows）；
+                               // 只作用于自动播放，设置页的试听永远会响；也走 choices
   categories: { <cat>: { …见下… } },
 }
 ```
@@ -313,7 +317,7 @@ window.__HOTLIST_SETTINGS__.set({ categories: { error: { sound: now.categories.e
 
 三种方式，都走同一条「随机取一条 + 全局音量」的路径：
 
-1. **设置页**：展开任意类别卡 → 音效组 → 「试听」。这是用户路径，试听**绕过**冷启动闸门与 1500 ms 节流（明确点击就该响）。
+1. **设置页**：展开任意类别卡 → 音效组 → 「试听」。这是用户路径，试听**绕过**冷启动闸门、1500 ms 节流**和耳机门禁**（明确点击就该响——否则用户在扬声器上就没法确认素材是好的）。
 2. **API**：`window.__HOTLIST__.assets.preview('pending')` → `true` 表示已交给 `<audio>` 播放，`false` 表示该池空或浏览器拒绝 autoplay（原因记在 console.debug）。
 3. **临时调试**：`new Audio('/hotlist-sound/attention.wav').play()`，直接打内置文件，不经过设置。
 
@@ -323,7 +327,9 @@ window.__HOTLIST_SETTINGS__.set({ categories: { error: { sound: now.categories.e
 - 同一会话在同一类别里连续多轮不重复播，离开再回来可再播；
 - 首轮 sync 不播（避免开页面就一串声音）；
 - 两次播放间隔 < 1500 ms 时，后来的直接丢弃（不排队）；
-- 音量 = `sound.volume / 100`；autoplay 被拒时静默 + 一条 console.debug，不刷屏。
+- 音量 = `sound.volume / 100`；autoplay 被拒时静默 + 一条 console.debug，不刷屏；
+- **`audio.smart` 开着时先过耳机门禁**：没测到耳机就不播，且这次拒播**不消耗** 1500 ms 窗口（门禁在节流之前判）。想让它响，要么插耳机，要么把这个开关关掉；
+- console 里的四种日志：`skip`（门禁拒，第二参数 `audio-unknown` / `not-headphones`）、`throttle`、`mute`、`play`——排障先看它。
 
 ---
 
@@ -373,15 +379,15 @@ await fetch('/hotlist-ring?cat=pending&seconds=4&scope=Primary&anim=Gif',
   - **tab 座位** —— `conversation.view` slot（`SLOT`，`client.js:80`），`mountTabSeats()` 注册。
   - **窗口顶栏** —— `shell.overlay` slot（`TOPBAR_SLOT`，`client.js:115`），`mountTopbar()` 注册。
   - **左侧会话栏图标** —— 不占 slot，直接增强宿主 DOM（`[role="treeitem"][data-row-key^="session:"]` 行里插 `span[data-hotlist-glyph]`），`createSidebarAdapter()`。
-  - **音效 + 弹出图** —— 不占 slot：音效走宿主 web 路由 `/hotlist-sound`，弹出图由 `mountPopout()`（`client.js:4427`）append 到 `document.body`。
-  - **超级提醒** —— 不占 slot，也不是 DOM：页面 `fetch('/hotlist-ring')` 让宿主半边起一个独立进程（`createRingPlayer` `client.js:5085` · `serveRing` `index.js:167` · `tools/attn-ring/Show-AttnRing.ps1`）。
+  - **音效 + 弹出图** —— 不占 slot：音效走宿主 web 路由 `/hotlist-sound`，弹出图由 `mountPopout()`（`client.js:4444`）append 到 `document.body`。
+  - **超级提醒** —— 不占 slot，也不是 DOM：页面 `fetch('/hotlist-ring')` 让宿主半边起一个独立进程（`createRingPlayer` `client.js:5160` · `serveRing` `index.js:167` · `tools/attn-ring/Show-AttnRing.ps1`）。
 
   加第六个面时，照上面挑一种挂法，再看 `docs/ARCHITECTURE.md` 的「扩展点」一节。
 - 改动后必须跑：`node --check client.js`、`node --check index.js`、`node --check test/classify.test.mjs`、`node test/classify.test.mjs`。四样全绿才算完。
 
 ---
 
-## 9. 这一版的类别判定优先级（v5.0.0-alpha.1）
+## 9. 这一版的类别判定优先级（v5.3.0）
 
 **一个会话只属于一个类别。** `classify()` 从上往下走，第一条命中的就定了，后面的条件不再看。
 

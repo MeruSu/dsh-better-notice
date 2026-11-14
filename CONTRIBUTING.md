@@ -37,17 +37,17 @@ cd <your clone directory>
 
 node --check client.js          # 语法闸门。client.js 的语法错只在真机 boot 时炸，没有别的地方会替你发现
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 65 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 115 groups
 ```
 
 然后进真机：
 
-1. **强刷页面**（`Ctrl+F5`），控制台敲 `window.__HOTLIST_VERSION__`，必须是 `'4.6.5'`（或你改后的版本号）。不是旧值说明加载的还是缓存。
-2. 打开 设置 → 热表，确认设置页能渲染、7 张卡都在。
+1. **强刷页面**（`Ctrl+F5`），控制台敲 `window.__HOTLIST_VERSION__`，必须是 `'5.3.0'`（或你改后的版本号）。不是旧值说明加载的还是缓存。
+2. 打开 设置 → 热表，确认设置页能渲染、6 张卡都在。
 3. 按你改的那块功能实际走一遍：座位数量、侧栏图标、弹出图、音效。**能在界面上看见的才算改完**，单测绿了不代表平时能看。
 4. 改了 `index.js` / `cordis.patch.yml` / `package.json` 的，**重启 GUI 再看**，光刷新不算。
 
-新增或改动单测组时，同步更新 [docs/TESTING.md](docs/TESTING.md) §1.2 的表格（一行一组，`test:<行号>`）和组数（现在是 58）。
+新增或改动单测组时，同步更新 [docs/TESTING.md](docs/TESTING.md) §1.2 的表格（一行一组，`test:<行号>`）和组数（现在是 115）。
 
 ## 一条必须记住的教训：宿主会调用的回调，传函数，不要传值
 
@@ -55,7 +55,7 @@ node test/classify.test.mjs     # 期望最后一行：PASS — 65 groups
 
 宿主（`dsh-client-shortcuts`）不是把你的 `label` 当字符串用，它会在建目录时调用 `command.label()`（`dsh-client-shortcuts/lib/client.js:1190`、`:1249`）。传字符串的结果是 `TypeError: command.label is not a function`——而且这个错发生在 boot 阶段，**挂掉的是整个 Web UI，不是热表这一个功能**，用户看到的是白屏。
 
-正确写法（`client.js:6837-6840` 的注释就写着这条）：
+正确写法（`client.js:6920-6923` 的注释就写着这条）：
 
 ```js
 // label 是 thunk：宿主稍后自己调 command.label() 取当前文案。
@@ -72,8 +72,8 @@ register('hotlist.cycle.prev', 'BracketLeft', () => t('shortcuts.cyclePrev'));
 
 设置存在用户的浏览器里，会跨版本存活很久。
 
-- **只新增字段 / 只新增一个类别子项**：不用升版本、不用写迁移。读取时每个字段各自回落默认（`sanitizeSettings`，`client.js:1197`），老记录缺这个键就是默认值。v4.1 加 `glyph.source` 就是这么做的。
-- **改字段含义、改结构、删字段、改默认语义**：**必须**在 `migrateSettings` / `upgradePatch`（`client.js:1873`、`:1868`）里写迁移，并把 `SETTINGS_VERSION`（`client.js:174`，当前 `4`）加一。不写迁移 = 老用户的设置读出来是错的，而且不报错。
+- **只新增字段 / 只新增一个类别子项**：不用升版本、不用写迁移。读取时每个字段各自回落默认（`sanitizeSettings`，`client.js:1209`），老记录缺这个键就是默认值。v4.1 加 `glyph.source` 就是这么做的。
+- **改字段含义、改结构、删字段、改默认语义**：**必须**在 `migrateSettings` / `upgradePatch`（`client.js:1889`、`:1868`）里写迁移，并把 `SETTINGS_VERSION`（`client.js:174`，当前 `4`）加一。不写迁移 = 老用户的设置读出来是错的，而且不报错。
 - **动到座位 id 前缀或旧 view id**（`hotlist-seat-`、`session-switcher`）：先看 `docs/ARCHITECTURE.md` §3——`healViewPreferences` / `repairSourcePreference` 那套修补是有原因的，删掉会让老用户的 tab 顺序错乱，严重时把宿主拖进 React #185 死循环。
 - **动设置键名**：`SETTINGS_KEY` 变了等于所有用户设置清零，必须配迁移读旧键。
 
@@ -86,7 +86,7 @@ register('hotlist.cycle.prev', 'BracketLeft', () => t('shortcuts.cyclePrev'));
   - 差：`fix bug`
 - 一个提交只做一件事。格式化、重命名混在功能改动里，复核时看不出哪行是真正的改动。
 - 改了用户能看见的行为，同步更新 [CHANGELOG.md](CHANGELOG.md)（一条一段：改了什么、为什么、影响谁）。
-- 版本号在两处，必须一致：`client.js` 的 `VERSION`（`client.js:82`）与 `package.json` 的 `version`。发布版两者同步（当前都是 `5.2.1`）；`package.json` 的 `version` 同时是 npm 分发版本号。
+- 版本号在两处，必须一致：`client.js` 的 `VERSION`（`client.js:82`）与 `package.json` 的 `version`。发布版两者同步（当前都是 `5.3.0`）；`package.json` 的 `version` 同时是 npm 分发版本号。
 
 ## 几件不要做的事
 
@@ -98,7 +98,7 @@ register('hotlist.cycle.prev', 'BracketLeft', () => t('shortcuts.cyclePrev'));
 ## PR 前自查
 
 - [ ] `node --check client.js` 和 `node --check index.js` 都过
-- [ ] `node test/classify.test.mjs` 末行是 `PASS — 65 groups`（或你更新后的组数）
+- [ ] `node test/classify.test.mjs` 末行是 `PASS — 115 groups`（或你更新后的组数）
 - [ ] 强刷后 `window.__HOTLIST_VERSION__` 是新版本号
 - [ ] 在真机界面上实际看过改动（不是只看测试输出）
 - [ ] 改了设置形状的，迁移和迁移单测都在

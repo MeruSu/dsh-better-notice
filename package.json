@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-notice",
-  "version": "5.2.1",
+  "version": "5.3.0",
   "private": false,
   "description": "Better Notice — unified visual and audible session notices for DeepSeek Harness: hot-session tab seats, sidebar state glyphs, per-state sounds and popout artwork",
   "type": "module",
@@ -20,7 +20,8 @@
     "assets",
     "locale",
     "icon.svg",
-    "tools/attn-ring"
+    "tools/attn-ring",
+    "tools/audio-endpoint"
   ],
   "keywords": [
     "dsh",
