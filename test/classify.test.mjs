@@ -679,7 +679,7 @@ test('alpha version 5 normalizes safely', () => {
   const normalized = api.readSettings();
   assert.equal(normalized.version, 4);
   assert.equal(normalized.categories.error.order, 5);
-  assert.equal(normalized.maxSeats, 6);
+  assert.equal(normalized.maxSeats, 7);
   storage.removeItem('dsh.hotlist.settings.v1');
   api.resetSettings();
 });
@@ -702,7 +702,7 @@ test('bad data falls back', () => {
   }));
   const settings = api.readSettings();
   assert.equal(settings.version, 4);
-  assert.equal(settings.maxSeats, 6);
+  assert.equal(settings.maxSeats, 7);
   assert.deepEqual(settings.positions, { tab: true, topbar: true, sidebar: true });
   assert.equal(settings.overlay.side, 'auto');
   assert.equal(settings.overlay.sizeMax, 900);
@@ -936,7 +936,7 @@ test('surface gating', () => {
     ['error', false, true],
     ['pending', false, true],
     ['completed', false, true],
-    ['running', false, false],
+    ['running', true, false],
     ['idle', true, false],
   ]);
 
@@ -948,7 +948,7 @@ test('surface gating', () => {
   const errors = new Map([['err1', { message: 'boom', at: NOW }]]);
   const input = { list, statuses, errors, completedAt: new Map(), now: NOW, workspaceIds: null, limit: 5 };
   const tab = api.buildSeatPlan({ ...input, surface: 'tab' }, settings);
-  assert.deepEqual(tab.map((seat) => seat.sessionId), ['idle1'], 'the tab row shows the background classes only');
+  assert.deepEqual(tab.map((seat) => seat.sessionId), ['run1', 'idle1'], 'running rides the tab row by default now');
   const band = api.buildSeatPlan({ ...input, surface: 'topbar' }, settings);
   assert.deepEqual(band.map((seat) => seat.sessionId), ['err1'], 'the band shows the urgent classes only');
   const sidebar = api.classify(settings, { ...input, surface: 'sidebar' });
@@ -1078,7 +1078,7 @@ test('settings surface', () => {
   assert.equal(overridden.maxSeats, 9);
   const projected = win.__HOTLIST_SETTINGS__.get();
   assert.equal(projected.categories.pending.glyph.value, '🔐');
-  assert.equal(api.overrideSettings(null).maxSeats, 6);
+  assert.equal(api.overrideSettings(null).maxSeats, 7);
   storage.removeItem('dsh.hotlist.settings.v1');
   storage.setItem('dsh.session-switcher.settings', JSON.stringify({ version: 3, maxSeats: 3 }));
   const migrated = api.readSettings();
@@ -1112,7 +1112,7 @@ await testAsync('adapter plan', async () => {
   api.apply(harness.ctx, {});
   await tick();
   const seats = () => orders(harness.entries);
-  assert.deepEqual(seats(), [['s1', 5001]], 'running belongs to the band and the sidebar now, so s2 earns no tab seat');
+  assert.deepEqual(seats(), [['s2', 3001], ['s1', 5001]], 'running rides the tab row by default now, so s2 earns a seat');
   const registrations = harness.registrations.length;
 
   /** Clicking a seat opens that session and falls back to `chat` on both sides. */
@@ -1422,7 +1422,7 @@ test('settings reset drops legacy keys', () => {
   api.resetSettings();
   const stored = JSON.parse(storage.getItem('dsh.hotlist.settings.v1'));
   assert.equal(stored.version, 4);
-  assert.equal(stored.maxSeats, 6);
+  assert.equal(stored.maxSeats, 7);
   for (const key of ['states', 'glyphs', 'motion', 'placement', 'showIdle']) {
     assert.equal(key in stored, false, `legacy key ${key} survived`);
   }
@@ -2627,7 +2627,7 @@ test('recent window UI bounds match the API', () => {
 test('defaults for v4.6.3', () => {
   const settings = api.defaultSettings();
   const table = {
-    pinned: { motion: 'bounce', motionTarget: 'row', frequency: 0.3, sound: true },
+    pinned: { motion: 'bounce', motionTarget: 'row', frequency: 0.3, sound: false },
     error: { motion: 'bounce', motionTarget: 'row', frequency: 0.9, sound: true },
     pending: { motion: 'bounce', motionTarget: 'row', frequency: 0.9, sound: true },
     completed: { motion: 'spin', motionTarget: 'row', frequency: 1, sound: true },
@@ -3079,7 +3079,7 @@ const factoryTopbar = () => ({
   previewInWeb: false,
   rightReservePx: 0,
   chipWidthPct: 0,
-  customScope: { pinned: true, error: true, pending: true, completed: true, running: true, idle: true },
+  customScope: { pinned: true, error: false, pending: false, completed: false, running: false, idle: false },
 });
 
 test('topbar settings are clamped', () => {
@@ -3621,9 +3621,9 @@ test('the band takes the urgent classes and the tab row the background ones', ()
   const band = api.buildSeatPlan({ ...input, surface: 'topbar' }, settings);
   const tab = api.buildSeatPlan({ ...input, surface: 'tab' }, settings);
   assert.deepEqual(band.map((seat) => seat.category).sort(), ['completed', 'error', 'pending'], 'three urgent rows ride the band');
-  assert.deepEqual(tab.map((seat) => seat.category).sort(), ['idle', 'pinned'], 'two background rows ride the tab');
+  assert.deepEqual(tab.map((seat) => seat.category).sort(), ['idle', 'pinned', 'running'], 'running rides the tab row by default now');
   assert.equal(band.some((seat) => seat.sessionId === 'run-1'), false, 'running rides neither row');
-  assert.equal(tab.some((seat) => seat.sessionId === 'run-1'), false, 'running rides neither row');
+  assert.equal(tab.some((seat) => seat.sessionId === 'run-1'), true, 'running rides the tab row by default now');
   assert.equal(band.some((seat) => seat.sessionId === 'idle-1'), false, 'the band never takes an idle session');
   assert.equal(tab.some((seat) => seat.sessionId === 'err-1'), false, 'and the tab row never takes an urgent one');
 });
@@ -3669,11 +3669,24 @@ test('label modes draw exactly one emoji', () => {
   assert.equal(api.stripLeadingEmoji('UI 大师'), 'UI 大师');
 
   const seat = { sessionId: 'emo-1', title: '✏️UI 大师', token: 'idle' };
-  const build = (titleMode, scope) => api.sanitizeSettings({
-    topbar: scope === undefined ? { titleMode } : { titleMode, customScope: scope },
-    categories: { idle: { glyph: { value: '👑' } } },
-  });
-  assert.equal(api.labelOf((key) => key, seat, build('custom')), '✏️ UI 大师', 'custom: one emoji, the title\'s own');
+  /**
+   * `customScope` ships pinned-only, and switching a class on writes a choice mark in the
+   * real UI — the test has to do the same or the old preset eats the value.
+   */
+  const build = (titleMode, scope) => {
+    const choices = {};
+    if (scope !== undefined) {
+      for (const category of api.CATEGORY_IDS) choices['topbar.customScope.' + category] = true;
+    }
+    return api.sanitizeSettings({
+      topbar: scope === undefined ? { titleMode } : { titleMode, customScope: scope },
+      categories: { idle: { glyph: { value: '👑' } } },
+      choices,
+    });
+  };
+  /** `customScope` ships pinned-only now, so a class must opt in before its title emoji wins. */
+  assert.equal(api.labelOf((key) => key, seat, build('custom')), '👑 UI 大师', 'custom outside the scope: the category icon');
+  assert.equal(api.labelOf((key) => key, seat, build('custom', { idle: true })), '✏️ UI 大师', 'custom in scope: one emoji, the title\'s own');
   assert.equal(api.labelOf((key) => key, seat, build('custom', { idle: false })), '👑 UI 大师', 'custom outside the scope: the category icon');
   assert.equal(api.labelOf((key) => key, seat, build('icon')), '👑 UI 大师', 'icon: the category icon, the title emoji stripped');
   assert.equal(api.labelOf((key) => key, seat, build('text')), 'UI 大师', 'text: no emoji at all');
@@ -3693,11 +3706,11 @@ test('label modes draw exactly one emoji', () => {
   assert.equal(api.isEmojiOnly('\u{1F9EA}\u2753'), true);
   assert.equal(api.isEmojiOnly('\u{1F9EA}\u2753 待选择'), false);
   const twoEmoji = { sessionId: 'emo-3', title: '\u{1F9EA}\u2753 待选择 11:58:18', token: 'completed' };
-  assert.equal(api.labelOf((key) => key, twoEmoji, build('custom')), '\u2753 待选择 11:58:18', 'one emoji, never two');
+  assert.equal(api.labelOf((key) => key, twoEmoji, build('custom', { completed: true })), '\u2753 待选择 11:58:18', 'one emoji, never two');
   assert.equal(api.labelOf((key) => key, twoEmoji, build('icon')), '\u2705 待选择 11:58:18', 'icon mode: ours only');
   assert.equal(api.labelOf((key) => key, twoEmoji, build('text')), '待选择 11:58:18', 'text mode: no emoji at all');
   const emojiOnly = { sessionId: 'emo-4', title: '\u{1F9EA}', token: 'idle' };
-  assert.equal(api.labelOf((key) => key, emojiOnly, build('custom')), '\u{1F9EA}', 'an emoji-only title is its own label');
+  assert.equal(api.labelOf((key) => key, emojiOnly, build('custom', { idle: true })), '\u{1F9EA}', 'an emoji-only title is its own label');
 });
 
 // 84. The three modes speak readable names, and old names still load.
@@ -3751,7 +3764,9 @@ test('the scope row only exists in custom mode', () => {
       assert.equal(custom.rows.length, 6, 'six categories, six switches');
       assert.deepEqual(custom.rows.map((node) => node.props['data-hotlist-scope']), ['error', 'pending', 'completed', 'running', 'idle', 'pinned'], 'ordered like the cards');
       const first = custom.rows[0];
-      assert.equal(first.props['data-on'], 'true', 'factory defaults are all on');
+      assert.equal(first.props['data-on'], 'false', 'customScope ships pinned-only, so error starts off');
+      const pinnedRow = custom.rows.find((node) => node.props['data-hotlist-scope'] === 'pinned');
+      assert.equal(pinnedRow.props['data-on'], 'true', 'pinned is the one class that ships on');
       assert.equal(typeof first.children[0].props.onChange, 'function', 'each switch is a real toggle');
     } finally {
       custom.harness.cleanup();
@@ -3790,7 +3805,12 @@ test('pills strip the title emoji the same way', () => {
     assert.deepEqual(emoji(), ['🧊', '🧊'], 'the category icon, not the title\'s own');
     assert.deepEqual(titles(), ['大聪明', '小聪明'], 'and the title emoji is gone from the text');
 
+    /** `customScope` ships pinned-only, so a class has to opt in before its title emoji wins. */
     api.writeSettings({ topbar: { ...api.readSettings().topbar, titleMode: 'custom' } });
+    assert.deepEqual(emoji(), ['🧊', '🧊'], 'custom outside the scope: the category icon');
+    api.writeSettings({
+      topbar: { ...api.readSettings().topbar, titleMode: 'custom', customScope: { ...api.readSettings().topbar.customScope, idle: true } },
+    });
     /**
      * `custom` draws the title's own emoji into the glyph slot so the class
      * animation has something to run on; the text column keeps only the title.
@@ -4000,12 +4020,14 @@ test('the table names every seat and why the rest are out', () => {
     bandUp: false,
   };
   const table = api.hotlistTable(base, snapshot, runtime);
-  assert.deepEqual(table.rows.map((row) => row.sessionId), ['t-idle'], 'one idle seat fits the limit');
+  /** `running` rides the tab row since 5.3.1, and its order (30) beats idle (50), so it takes the one seat. */
+  assert.deepEqual(table.rows.map((row) => row.sessionId), ['t-run'], 'the running seat fits the limit');
   assert.deepEqual(table.rows[0].surfaces, { tab: true, sidebar: false, topbar: false }, 'the table knows which surface paints it');
   assert.equal(table.rows[0].index, 1, 'rows are numbered');
   const reasons = new Map(table.missing.map((item) => [item.sessionId, item.reason]));
   assert.equal(reasons.get('t-cap'), 'over-cap', 'a session past the cap says so');
-  assert.equal(reasons.get('t-run'), 'position-off', 'a class whose surface is off says so');
+  assert.equal(reasons.get('t-idle'), 'over-cap', 'and so does the idle one behind the running seat');
+  assert.equal(reasons.get('t-ask'), 'position-off', 'a class whose surface is off says so');
   assert.equal(reasons.get('t-blank'), 'empty', 'a blank session is not a hot session');
   assert.equal(reasons.get('t-sub'), 'subagent', 'and neither is a subagent');
   assert.equal(table.limit, 1, 'the limit rides along for the label');
@@ -4014,6 +4036,7 @@ test('the table names every seat and why the rest are out', () => {
   const off = api.hotlistTable(base, snapshot, runtime);
   const offReasons = new Map(off.missing.map((item) => [item.sessionId, item.reason]));
   assert.equal(offReasons.get('t-idle'), 'surface-off', 'a class with every surface off says so');
+  assert.equal(off.rows.some((row) => row.sessionId === 't-idle'), false, 'the silenced class is not painted');
 
   const scoped = api.hotlistTable(api.sanitizeSettings({}), { ...snapshot, scope: 'workspace', workspaceIds: ['t-idle'] }, runtime);
   const scopeReasons = new Map(scoped.missing.map((item) => [item.sessionId, item.reason]));
@@ -4227,6 +4250,8 @@ test('a yielded title still shows a class glyph', () => {
   clearStyleBlocks();
   const row = sidebarRow('session-yield', '🎓 大聪明');
   const settings = api.defaultSettings();
+  /** `customScope` ships pinned-only now, so the idle class has to opt in before it yields. */
+  settings.topbar.customScope.idle = true;
   const adapter = api.createSidebarAdapter({
     document: globalThis.document,
     readSettings: () => settings,
@@ -4815,7 +4840,7 @@ test('the ring hint is gone and the audio switch takes its place', () => {
     assert.equal(source.includes(marker), false, 'the ring hint key is gone from the dictionary');
   }
   assert.equal(source.includes("'settings.audio.smart':"), true);
-  assert.equal(source.includes("'settings.audio.needSetup':"), true);
+  assert.equal(source.includes("'settings.audio.needSetup':"), false);
 
   const { harness, page } = renderPage();
   try {
@@ -4826,7 +4851,7 @@ test('the ring hint is gone and the audio switch takes its place', () => {
       assert.equal(rows.includes(key), true, 'the ring switches stay');
     }
     const notes = collect(page, (props) => props.key === 'audioNote').map((node) => textOf(node));
-    assert.equal(notes.includes('settings.audio.needSetup'), true, 'the setup note renders next to the switch');
+    assert.equal(rows.includes('audio.config'), true, 'the config row renders next to the switch');
     const hintTexts = collect(page, (props) => props.className === 'hl-rowHint').map((node) => textOf(node));
     assert.equal(hintTexts.includes('settings.ring.hint'), false, 'no leftover hint text');
   } finally {
@@ -4845,6 +4870,181 @@ test('the audio probe is scriptable and answers before any probe has run', async
   } finally {
     harness.cleanup();
   }
+});
+
+// 116. The four shipped defaults the user tuned on a clean instance (task-82).
+test('a fresh install matches the shipped defaults', () => {
+  const settings = api.defaultSettings();
+  assert.equal(settings.maxSeats, 7, 'seven seats by default');
+  assert.equal(settings.categories.running.surfaces.tab, true, 'running rides the tab row');
+  assert.equal(settings.categories.running.surfaces.topbar, false, 'and never the band');
+  assert.deepEqual(settings.topbar.customScope, {
+    pinned: true,
+    error: false,
+    pending: false,
+    completed: false,
+    running: false,
+    idle: false,
+  }, 'only pinned claims the title emoji in custom mode');
+  assert.equal(settings.categories.pinned.sound.enabled, false, 'pinned is silent');
+  /** The other three surfaces are untouched: the band still owns the urgent classes. */
+  assert.equal(settings.categories.error.surfaces.topbar, true, 'error still rings in the band');
+  assert.equal(settings.categories.pending.surfaces.topbar, true, 'pending still rings in the band');
+  assert.equal(settings.categories.completed.surfaces.topbar, true, 'completed still rings in the band');
+  assert.equal(settings.categories.error.surfaces.tab, false, 'error keeps out of the tab row');
+});
+
+// 117. The old factory values are presets, not choices: an untouched archive follows the new ones.
+test('an untouched old preset is upgraded, a chosen one is not', () => {
+  const old = {
+    version: 4,
+    maxSeats: 6,
+    categories: {
+      running: { surfaces: { tab: false, sidebar: true, topbar: false } },
+      pinned: { sound: { enabled: true } },
+    },
+    topbar: {
+      customScope: {
+        pinned: true, error: true, pending: true, completed: true, running: true, idle: true,
+      },
+    },
+  };
+  const upgraded = api.sanitizeSettings(old);
+  assert.equal(upgraded.maxSeats, 7, 'an untouched 6 follows the new default');
+  assert.equal(upgraded.categories.running.surfaces.tab, true, 'an untouched false follows the new default');
+  assert.equal(upgraded.categories.pinned.sound.enabled, false, 'an untouched "on" follows the new default');
+  assert.equal(upgraded.topbar.customScope.error, false, 'an untouched true in a non-pinned class follows the default');
+  assert.equal(upgraded.topbar.customScope.pinned, true, 'pinned stays on');
+
+  const chosen = api.sanitizeSettings({
+    ...old,
+    choices: {
+      maxSeats: true,
+      'categories.running.surfaces.tab': true,
+      'categories.pinned.sound.enabled': true,
+      'topbar.customScope.error': true,
+    },
+  });
+  assert.equal(chosen.maxSeats, 6, 'a chosen seat count stands');
+  assert.equal(chosen.categories.running.surfaces.tab, false, 'a chosen surface stands');
+  assert.equal(chosen.categories.pinned.sound.enabled, true, 'a chosen sound stands');
+  assert.equal(chosen.topbar.customScope.error, true, 'a chosen scope entry stands');
+});
+
+
+/* ------------------------------------------------- audio config: device list (task-79) */
+
+test('audio config: the six states are derived, never stored', () => {
+  const api = loaded.api;
+  assert.equal(api.audioConfigStateOf(null), 'hostDown');
+  assert.equal(api.audioConfigStateOf({ platform: 'darwin' }), 'unsupported');
+  assert.equal(api.audioConfigStateOf({ platform: 'win32', exists: false }), 'missing');
+  assert.equal(api.audioConfigStateOf({ platform: 'win32', exists: true, valid: false }), 'invalid');
+  assert.equal(
+    api.audioConfigStateOf({ platform: 'win32', exists: true, valid: true, headphoneCount: 0 }),
+    'empty',
+  );
+  assert.equal(
+    api.audioConfigStateOf({ platform: 'win32', exists: true, valid: true, headphoneCount: 2 }),
+    'ready',
+  );
+});
+
+test('audio config: device names match in three levels, and short names never match', () => {
+  const api = loaded.api;
+  assert.equal(api.normDeviceName('耳机 (Baseus Bass BC2 Stereo)'), '耳机');
+  assert.equal(api.normDeviceName('  耳机（USB Audio）  '), '耳机');
+  assert.equal(api.normDeviceName('Headphones'), 'headphones');
+
+  assert.equal(api.deviceNameMatches('耳机 (Baseus)', '耳机 (Baseus)'), true, 'exact');
+  assert.equal(api.deviceNameMatches('耳机', '耳机 (Baseus)'), false, 'short side under six chars');
+  assert.equal(api.deviceNameMatches('USB  Headset   Pro', 'usb headset pro'), true, 'normalised');
+  assert.equal(
+    api.deviceNameMatches('耳机 (Baseus)', '耳机 （Baseus）'),
+    false,
+    'two-character names need an exact match, never a fuzzy one',
+  );
+  assert.equal(
+    api.deviceNameMatches('USB Audio Headset Pro', 'USB Audio Headset Pro (2)'),
+    true,
+    'contained on the longer side',
+  );
+  assert.equal(
+    api.deviceNameMatches('Baseus Bass BC2 Stereo', '耳机 (Baseus Bass BC2 Stereo)'),
+    false,
+    'the parenthesised tail is not a device identity',
+  );
+  assert.equal(api.deviceNameMatches('Realtek Speakers', 'Baseus Bass BC2 Stereo'), false);
+});
+
+test('audio config: a configured headphone list becomes a whitelist for the gate', () => {
+  const api = loaded.api;
+  const smart = api.sanitizeSettings({ audio: { smart: true } });
+  const at = 1_000_000;
+  const probe = { at: at - 1000, state: 'measured', error: null, kindGuess: 'headphones', name: '耳机 (Baseus Bass BC2 Stereo)' };
+  const config = {
+    platform: 'win32',
+    valid: true,
+    devices: [
+      { name: '扬声器 (Realtek(R) Audio)', direction: 'render', group: 'speakers' },
+      { name: '耳机 (Baseus Bass BC2 Stereo)', direction: 'render', group: 'headphones' },
+    ],
+  };
+
+  assert.equal(api.listedHeadphones(config).length, 1);
+  assert.equal(api.audioGateAllowed(smart, probe, at, config).allow, true, 'listed device passes');
+  assert.equal(
+    api.audioGateAllowed(smart, { ...probe, name: '扬声器 (Realtek(R) Audio)' }, at, config).allow,
+    false,
+    'a speaker is refused even while the probe guessed headphones',
+  );
+  assert.equal(
+    api.audioGateAllowed(smart, { ...probe, name: 'USB Headset' }, at, config).reason,
+    'not-headphones',
+  );
+  assert.equal(
+    api.audioGateAllowed(smart, probe, at, { ...config, platform: 'darwin' }).reason,
+    'audio-unknown',
+  );
+  assert.equal(
+    api.audioGateAllowed(smart, probe, at, { platform: 'win32', valid: true, devices: [] }).allow,
+    true,
+    'an empty list falls back to the probe',
+  );
+  assert.equal(api.audioGateAllowed({ audio: { smart: false } }, null, at, config).allow, true);
+});
+
+test('audio config: the prompt never leaks a placeholder or a home directory', () => {
+  const api = loaded.api;
+  // The module keeps its dictionaries private; audioPromptText picks the language by
+  // comparing the live title against the Chinese table, so a stub that echoes the
+  // Chinese title selects ZH and anything else selects EN.
+  const titleZh = JSON.parse(
+    JSON.stringify(/^\s*'settings\.audio\.title': '([^']*)',$/m.exec(source)?.[1] ?? ''),
+  );
+  const zh = (key) => (key === 'settings.audio.title' ? titleZh : key);
+  const en = (key) => key;
+  const config = {
+    path: 'C:\\Profiles\\x\\.dsh\\hotlist-audio.json',
+    script: 'C:\\Apps\\notice\\tools\\audio-endpoint\\audio-devices.ps1',
+  };
+
+  for (const t of [zh, en]) {
+    const text = api.audioPromptText(t, config);
+    assert.equal(text.includes('{{'), false, 'no placeholder survives');
+    assert.equal(text.includes('%USERPROFILE%'), false, 'the real path wins');
+    assert.equal(text.includes(config.path), true);
+    assert.equal(text.includes(config.script), true);
+  }
+
+  const noScript = api.audioPromptText(zh, { path: config.path, script: null });
+  assert.equal(noScript.includes('{{SCRIPT_PATH}}'), false, 'the placeholder is gone');
+  assert.equal(noScript.includes('audio-devices.ps1') === false || noScript.includes('找不到') === true, true);
+  assert.equal(noScript.includes('{{'), false);
+
+  const noConfig = api.audioPromptText(zh, null);
+  assert.equal(noConfig.includes('%USERPROFILE%'), true, 'the fallback path is spelled out');
+  assert.equal(noConfig.includes('{{'), false);
 });
 
 console.log(`PASS — ${groups} groups`);

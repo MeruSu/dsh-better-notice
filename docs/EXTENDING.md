@@ -34,7 +34,7 @@ api.lastError()        // 最近一次写盘错误（字符串或 null）
 ```
 
 同一对象也挂在旧名 `window.__SESSION_SWITCHER_SETTINGS__`（v2.x 兼容，别在新代码里用）。
-插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.0'`）。
+插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.1'`）。
 
 写设置后不需要刷新页面：tab、侧栏、设置页都在同一个 store 上重算。
 
@@ -102,6 +102,37 @@ window.__HOTLIST__.topbar();
 - 手工写这个字段没用，`sanitizeChoices()` 只认合法形状、丢弃 `false` 与超长键。
 
 ---
+
+### 1.5 音频探针 `window.__HOTLIST__.audio()`
+
+只读，播放器还没挂载时返回 `null`：
+
+```js
+window.__HOTLIST__.audio();
+// {
+//   smart,       // audio.smart 开着没有
+//   state,       // 探测状态：'measured' | 'unknown' | ...
+//   kindGuess,   // 探测对默认输出设备的类型判断
+//   name,        // 当前默认输出设备名
+//   error,       // 探测失败原因（成功时 null）
+//   asOf,        // 这次探测结果的取得时间（ms）
+//   pass,        // 门禁此刻会给的答案（开关关着永远 true）
+//   config,      // 设备清单摘要，见下
+// }
+```
+
+`config` 是**设备清单文件的摘要**（宿主回不来时也有对象，字段不缺）：
+
+```js
+// { status, exists, valid, path, script, platform,
+//   deviceCount, headphoneCount, guessCount, updatedAt }
+// status ∈ 'missing' | 'ready' | 'empty' | 'invalid' | 'unsupported' | 'hostDown'
+```
+
+- `status` 是**派生**的（`state = f(一次响应)`），不落盘：删掉文件，下一个 60 秒周期就回到 `missing`，不会留着一条过期的「已配置」。
+- `path` / `script` 是宿主解析后的**绝对路径**（浏览器读不到 `DSH_HOME`）；脚本找不到时 `script` 为 `null`，绝不给空串。
+- 「配了清单却不生效」先读这个：`status` 一句话说明文件那侧看到了什么；`ready` 但没响，才轮到「当前设备名不在白名单里」。
+- 配置是**叠加**：没有文件 / 文件坏了 / 清单里没标耳机 → 门禁退回 `kindGuess` 分支，不会变哑巴。链路细节见 `docs/ARCHITECTURE.md` §22。
 
 ## 2. 设置形状
 
@@ -379,15 +410,15 @@ await fetch('/hotlist-ring?cat=pending&seconds=4&scope=Primary&anim=Gif',
   - **tab 座位** —— `conversation.view` slot（`SLOT`，`client.js:80`），`mountTabSeats()` 注册。
   - **窗口顶栏** —— `shell.overlay` slot（`TOPBAR_SLOT`，`client.js:115`），`mountTopbar()` 注册。
   - **左侧会话栏图标** —— 不占 slot，直接增强宿主 DOM（`[role="treeitem"][data-row-key^="session:"]` 行里插 `span[data-hotlist-glyph]`），`createSidebarAdapter()`。
-  - **音效 + 弹出图** —— 不占 slot：音效走宿主 web 路由 `/hotlist-sound`，弹出图由 `mountPopout()`（`client.js:4444`）append 到 `document.body`。
-  - **超级提醒** —— 不占 slot，也不是 DOM：页面 `fetch('/hotlist-ring')` 让宿主半边起一个独立进程（`createRingPlayer` `client.js:5160` · `serveRing` `index.js:167` · `tools/attn-ring/Show-AttnRing.ps1`）。
+  - **音效 + 弹出图** —— 不占 slot：音效走宿主 web 路由 `/hotlist-sound`，弹出图由 `mountPopout()`（`client.js:5151`）append 到 `document.body`。
+  - **超级提醒** —— 不占 slot，也不是 DOM：页面 `fetch('/hotlist-ring')` 让宿主半边起一个独立进程（`createRingPlayer` `client.js:5884` · `serveRing` `index.js:167` · `tools/attn-ring/Show-AttnRing.ps1`）。
 
   加第六个面时，照上面挑一种挂法，再看 `docs/ARCHITECTURE.md` 的「扩展点」一节。
 - 改动后必须跑：`node --check client.js`、`node --check index.js`、`node --check test/classify.test.mjs`、`node test/classify.test.mjs`。四样全绿才算完。
 
 ---
 
-## 9. 这一版的类别判定优先级（v5.3.0）
+## 9. 这一版的类别判定优先级（v5.3.1）
 
 **一个会话只属于一个类别。** `classify()` 从上往下走，第一条命中的就定了，后面的条件不再看。
 

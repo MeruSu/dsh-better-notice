@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.3.0';
+    const VERSION = '5.3.1';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -229,6 +229,21 @@ window.__ModuleLoader__.load({
        * not a pick, so the current 17 replaces it; anyone who typed 5 gets a marker and keeps it.
        */
       'collect.recentWindowMinutes': [5],
+      /** The 5.3.0 factory seat count; a stored 6 with no marker follows the current 7. */
+      maxSeats: [6],
+      /** The tab row used to exclude running; a stored false is that old default, not a pick. */
+      'categories.running.surfaces.tab': [false],
+      /**
+       * The band's custom-icon scope shipped wide open in every class but pinned.
+       * A stored true for the other five is that old default; pinned stays true.
+       */
+      'topbar.customScope.error': [true],
+      'topbar.customScope.pending': [true],
+      'topbar.customScope.completed': [true],
+      'topbar.customScope.running': [true],
+      'topbar.customScope.idle': [true],
+      /** Pinned used to ring; a stored true is that old default, not a pick. */
+      'categories.pinned.sound.enabled': [true],
     };
     /**
      * Which picks the page can offer, and where their marker lives. Writing one of those fields
@@ -236,7 +251,7 @@ window.__ModuleLoader__.load({
      */
     const CHOICE_SLOTS = ['glyph', 'glyphSecondary'];
     const CHOICE_FIELDS = ['value', 'motion', 'motionTarget', 'frequency'];
-    const CHOICE_KEY = /^(?:categories\.[a-z]+\.[a-zA-Z]+(?:\.[a-zA-Z]+)?|positions\.topbar|collect\.recentWindowMinutes|ring\.(?:pending|error|completed)|audio\.smart)$/;
+    const CHOICE_KEY = /^(?:categories\.[a-z]+\.[a-zA-Z]+(?:\.[a-zA-Z]+)?|positions\.topbar|collect\.recentWindowMinutes|ring\.(?:pending|error|completed)|audio\.smart|maxSeats|topbar\.customScope\.[a-z]+)$/;
     /**
      * The three classes that can ring the whole screen. They are the same three
      * the band calls urgent; `running` and `idle` never take the screen away.
@@ -265,7 +280,7 @@ window.__ModuleLoader__.load({
       error: { tab: false, sidebar: true, topbar: true },
       pending: { tab: false, sidebar: true, topbar: true },
       completed: { tab: false, sidebar: true, topbar: true },
-      running: { tab: false, sidebar: true, topbar: false },
+      running: { tab: true, sidebar: true, topbar: false },
       /** Idle keeps its tab seat: the user asked for a third tier inside the tab row. */
       idle: { tab: true, sidebar: true, topbar: false },
     };
@@ -336,6 +351,470 @@ window.__ModuleLoader__.load({
     const AUDIO_PROBE_TTL_MS = 60 * 1000;
     /** Host route that answers "which device is the default output right now". */
     const AUDIO_ROUTE = '/hotlist-audio';
+    /** Host route that answers "what does the device-list file say" (task-79). */
+    const AUDIO_CONFIG_ROUTE = '/hotlist-audio/config';
+    /** The four group names the list file may use; the host maps anything else to `other`. */
+    const AUDIO_DEVICE_GROUPS = ['headphones', 'speakers', 'capture', 'other'];
+    /**
+     * A normalized name match shorter than this is a class word, not a device:
+     * Windows really ships a device called "耳机", and matching that against
+     * "耳机 (Baseus Bass BC2 Stereo)" would green-light speakers.
+     */
+    const AUDIO_DEVICE_MIN_MATCH = 6;
+    /** A config read slower than this counts as `hostDown`: the row never waits. */
+    const AUDIO_CONFIG_TIMEOUT_MS = 3000;
+
+    /**
+     * Last `/hotlist-audio/config` answer, or `null` when none has arrived yet.
+     * Module level on purpose: the settings row and the sound gate read the same
+     * object, and the gate must never wait for a fetch.
+     */
+    let audioConfig = null;
+    let audioConfigBusy = false;
+    let audioNoteTimer = null;
+    /** Settings pages re-render when an answer lands; nothing else subscribes. */
+    const audioConfigListeners = new Set();
+
+    function notifyAudioConfig() {
+      for (const listener of [...audioConfigListeners]) {
+        try {
+          listener();
+        } catch (thrown) {
+          console.debug('[hotlist] audio config listener failed', thrown);
+        }
+      }
+    }
+
+    /**
+     * Drop one level of balanced parentheses, ASCII or full width. Two passes
+     * cover the nested case ("耳机 (Baseus (2))"), and any further nesting is
+     * left alone rather than guessed at.
+     */
+    function normDeviceName(value) {
+      let text = value === undefined || value === null ? '' : String(value);
+      for (let pass = 0; pass < 4; pass += 1) {
+        const next = text.replace(/\([^()]*\)/g, ' ').replace(/（[^（）]*）/g, ' ');
+        if (next === text) break;
+        text = next;
+      }
+      return text.replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    /**
+     * Three-step name match: exact, normalized equal, normalized containment.
+     * The last two demand `AUDIO_DEVICE_MIN_MATCH` characters on the shorter
+     * side, so a bare class word can never claim a device it does not describe.
+     */
+    function deviceNameMatches(left, right) {
+      const first = left === undefined || left === null ? '' : String(left).trim();
+      const second = right === undefined || right === null ? '' : String(right).trim();
+      if (first === '' || second === '') return false;
+      if (first === second) return true;
+      const a = normDeviceName(first);
+      const b = normDeviceName(second);
+      if (a === '' || b === '') return false;
+      const shorter = a.length <= b.length ? a : b;
+      const longer = a.length <= b.length ? b : a;
+      if (shorter.length < AUDIO_DEVICE_MIN_MATCH) return false;
+      return shorter === longer || longer.includes(shorter);
+    }
+
+    /** The listed playback headphones, or `null` when the file cannot answer. */
+    function listedHeadphones(config) {
+      if (config === null || config === undefined || config.valid !== true) return null;
+      const devices = Array.isArray(config.devices) ? config.devices : [];
+      return devices.filter(
+        (device) =>
+          device !== null &&
+          typeof device === 'object' &&
+          device.direction === 'render' &&
+          device.group === 'headphones' &&
+          typeof device.name === 'string' &&
+          device.name.trim() !== '',
+      );
+    }
+
+    /** The six states are derived, never stored: `state = f(one config answer)`. */
+    function audioConfigStateOf(config) {
+      if (config === null || config === undefined) return 'hostDown';
+      if (config.platform !== 'win32') return 'unsupported';
+      if (config.exists !== true) return 'missing';
+      if (config.valid !== true) return 'invalid';
+      if (typeof config.headphoneCount === 'number' && config.headphoneCount > 0) return 'ready';
+      return 'empty';
+    }
+
+    /** The read-only slice `window.__HOTLIST__.audio().config` exposes. */
+    function audioConfigSummary() {
+      const config = audioConfig;
+      const status = audioConfigStateOf(config);
+      if (config === null || config === undefined) {
+        return {
+          status,
+          exists: false,
+          valid: false,
+          path: null,
+          script: null,
+          platform: null,
+          deviceCount: 0,
+          headphoneCount: 0,
+          guessCount: 0,
+          updatedAt: null,
+        };
+      }
+      return {
+        status,
+        exists: config.exists === true,
+        valid: config.valid === true,
+        path: typeof config.path === 'string' ? config.path : null,
+        script: typeof config.script === 'string' ? config.script : null,
+        platform: typeof config.platform === 'string' ? config.platform : null,
+        deviceCount: Number(config.deviceCount) || 0,
+        headphoneCount: Number(config.headphoneCount) || 0,
+        guessCount: Number(config.guessCount) || 0,
+        updatedAt: Number.isFinite(Number(config.updatedAt)) ? Number(config.updatedAt) : null,
+      };
+    }
+
+    /**
+     * Ask the host once. A failure, a timeout or a non-Windows host stores the
+     * failure shape, so the row says `hostDown` instead of keeping a stale
+     * "configured" line that is no longer true.
+     */
+    function refreshAudioConfig() {
+      if (audioConfigBusy === true) return;
+      if (typeof fetch !== 'function') return;
+      audioConfigBusy = true;
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer =
+        controller === null
+          ? null
+          : setTimeout(() => {
+              try {
+                controller.abort();
+              } catch {
+                /* an already-settled request is fine */
+              }
+            }, AUDIO_CONFIG_TIMEOUT_MS);
+      const stop = () => {
+        if (timer !== null) clearTimeout(timer);
+      };
+      fetch(`${AUDIO_CONFIG_ROUTE}?ts=${Date.now()}`, {
+        headers: { 'x-hotlist-audio': '1' },
+        signal: controller === null ? undefined : controller.signal,
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          audioConfig = payload !== null && typeof payload === 'object' && payload.ok === true ? payload : null;
+        })
+        .catch(() => {
+          audioConfig = null;
+        })
+        .finally(() => {
+          stop();
+          audioConfigBusy = false;
+          notifyAudioConfig();
+        });
+    }
+
+    /** The prompt language follows the page language, which the translator already knows. */
+    function audioPromptText(t, config) {
+      const zh = t('settings.audio.title') === ZH['settings.audio.title'];
+      const template = zh === true ? AUDIO_PROMPT_ZH : AUDIO_PROMPT_EN;
+      const path =
+        config !== null && config !== undefined && typeof config.path === 'string' && config.path !== ''
+          ? config.path
+          : '%USERPROFILE%\\.dsh\\hotlist-audio.json';
+      const script =
+        config !== null && config !== undefined && typeof config.script === 'string' && config.script !== ''
+          ? config.script
+          : zh === true
+            ? '（插件没找到脚本，请按下面的搜索片段自己找）'
+            : '(the plugin could not find the script — use the search snippet below)';
+      const notice =
+        config !== null && config !== undefined && typeof config.path === 'string' && config.path !== ''
+          ? ''
+          : zh === true
+            ? '如果下面的路径与你机器上的 DSH 目录不一致，以你实际的 DSH 目录为准。\n\n'
+            : 'If the path below differs from your DSH directory, use your real one.\n\n';
+      return notice + template.split('{{CONFIG_PATH}}').join(path).split('{{SCRIPT_PATH}}').join(script);
+    }
+
+    /**
+     * Two-step copy. `navigator.clipboard` needs a secure context, which a LAN
+     * address is not, so the textarea path has to exist; both failing is the
+     * caller's cue to show the text instead.
+     */
+    async function copyPromptText(text) {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch {
+        /* fall through to the textarea */
+      }
+      try {
+        if (typeof document === 'undefined' || typeof document.createElement !== 'function') return false;
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.setAttribute('aria-hidden', 'true');
+        area.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0';
+        document.body.appendChild(area);
+        if (typeof area.select === 'function') area.select();
+        if (typeof area.setSelectionRange === 'function') area.setSelectionRange(0, text.length);
+        const copied = typeof document.execCommand === 'function' ? document.execCommand('copy') : false;
+        if (typeof area.remove === 'function') area.remove();
+        else document.body.removeChild(area);
+        return copied === true;
+      } catch {
+        return false;
+      }
+    }
+
+    /**
+     * The two prompt templates a user copies into their own AI. They carry two
+     * placeholders, both replaced at copy time from the host's answer:
+     * `{{CONFIG_PATH}}` (the list file) and `{{SCRIPT_PATH}}` (the enumerator).
+     * The browser cannot read `DSH_HOME`, so a missing host answer falls back to
+     * a written-out default path and to a fixed sentence instead of `null`.
+     */
+    const AUDIO_PROMPT_ZH =
+      "我在用 DSH（DeepSeek Harness）的 Better Notice 插件。它有一个「智能音频」选项：只有当前默认输出设备是耳机时才播放提示音。这个判断需要一份「本机音频设备清单」文件，请你帮我生成它。\n" +
+      "\n" +
+      "请严格按下面 6 步做，不要跳步，不要自己发明采集方式。\n" +
+      "\n" +
+      "【环境】\n" +
+      "Windows 10 / 11。命令在 PowerShell 里执行。\n" +
+      "\n" +
+      "【第 1 步：找到枚举脚本】\n" +
+      "脚本的绝对路径是（插件自己写在这里的，先用它）：\n" +
+      "\n" +
+      "    {{SCRIPT_PATH}}\n" +
+      "\n" +
+      "先 `Test-Path -LiteralPath \"{{SCRIPT_PATH}}\"`。**存在就直接用它**，跳到第 2 步。\n" +
+      "\n" +
+      "只有它不存在时，才跑下面这段自己找（找到第一个就够）：\n" +
+      "\n" +
+      "    $found = @()\n" +
+      "    foreach ($root in @($env:DSH_HOME, \"$env:USERPROFILE\\.dsh\")) {\n" +
+      "      if (-not $root) { continue }\n" +
+      "      $direct = Join-Path $root \u0027node_modules\\dsh-better-notice\\tools\\audio-endpoint\\audio-devices.ps1\u0027\n" +
+      "      if (Test-Path -LiteralPath $direct) { $found += $direct }\n" +
+      "      $profiles = Join-Path $root \u0027profiles\u0027\n" +
+      "      if (Test-Path -LiteralPath $profiles) {\n" +
+      "        Get-ChildItem $profiles -Directory -ErrorAction SilentlyContinue | ForEach-Object {\n" +
+      "          $candidate = Join-Path $_.FullName \u0027node_modules\\dsh-better-notice\\tools\\audio-endpoint\\audio-devices.ps1\u0027\n" +
+      "          if (Test-Path -LiteralPath $candidate) { $found += $candidate }\n" +
+      "        }\n" +
+      "      }\n" +
+      "    }\n" +
+      "    $script = $found | Select-Object -First 1\n" +
+      "    $script\n" +
+      "\n" +
+      "如果 $script 仍然为空：**停下来**告诉我「找不到 audio-devices.ps1」，并把你搜过的路径贴给我。\n" +
+      "**不要**自己写采集代码，**不要**用 Get-PnpDevice / Get-CimInstance / WMI / SetupAPI —— 这些在这台机器上会被拒绝，白折腾。\n" +
+      "\n" +
+      "【第 2 步：跑脚本】\n" +
+      "先判断有没有 pwsh，没有就用 powershell：\n" +
+      "\n" +
+      "    if (Get-Command pwsh -ErrorAction SilentlyContinue) { $exe = \u0027pwsh\u0027 } else { $exe = \u0027powershell.exe\u0027 }\n" +
+      "    & $exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script\n" +
+      "\n" +
+      "它会在 stdout 输出**恰好一行 JSON**，退出码 0。形状：\n" +
+      "\n" +
+      "    {\"ok\":true,\"asOf\":1794512782766,\"elapsedMs\":1310,\"error\":null,\n" +
+      "     \"devices\":[{\"id\":\"…\",\"name\":\"耳机 (Baseus Bass BC2 Stereo)\",\"direction\":\"render\",\"formFactor\":3,\"kindGuess\":\"headphones\",\"guess\":false,\"state\":\"measured\"}]}\n" +
+      "\n" +
+      "- ok=false 时 devices 为空、error 是原因字符串 → 把 error 原文告诉我，然后停。\n" +
+      "- 一个设备都没有（devices 为空数组）→ 告诉我，然后停。\n" +
+      "\n" +
+      "【第 3 步：分组】\n" +
+      "按下面这张表给每台设备定 group，**照抄 name，一个字都不要改**（不要翻译、不要去掉括号里的型号、不要改大小写）：\n" +
+      "\n" +
+      "| 条件 | group | guess |\n" +
+      "|---|---|---|\n" +
+      "| direction 是 \"capture\" | capture | false |\n" +
+      "| kindGuess 是 \"headphones\" | headphones | false |\n" +
+      "| kindGuess 是 \"speakers\" | speakers | false |\n" +
+      "| kindGuess 是 \"unknown\"，且 name 里含 耳机 / 耳麦 / headphone / headset / earbud / airpod / bluetooth / 蓝牙 之一（不区分大小写） | headphones | true |\n" +
+      "| 其它 | other | false |\n" +
+      "\n" +
+      "注意：蓝牙耳机经常没有 formFactor，走到第 4 行是正常的，guess 记 true 就行——不要为了\"看起来确定\"把 guess 写成 false。\n" +
+      "\n" +
+      "【第 4 步：写文件】\n" +
+      "目标路径（绝对路径，直接用，不要改）：\n" +
+      "\n" +
+      "    {{CONFIG_PATH}}\n" +
+      "\n" +
+      "内容是 UTF-8 **不带 BOM** 的 JSON：\n" +
+      "\n" +
+      "    {\n" +
+      "      \"version\": 1,\n" +
+      "      \"updatedAt\": <当前 Unix 毫秒>,\n" +
+      "      \"devices\": [\n" +
+      "        { \"name\": \"<设备名原样>\", \"direction\": \"render\", \"group\": \"headphones\", \"kindGuess\": \"headphones\", \"guess\": false }\n" +
+      "      ]\n" +
+      "    }\n" +
+      "\n" +
+      "字段说明：\n" +
+      "- version：固定 1\n" +
+      "- updatedAt：当前时间的 Unix **毫秒**（不是秒）\n" +
+      "- devices：上面分好组的每一台设备一条，顺序随意\n" +
+      "- name / direction / kindGuess：从脚本输出原样搬过来\n" +
+      "- group：你按第 3 步定的\n" +
+      "- guess：你按第 3 步定的\n" +
+      "\n" +
+      "写盘用这一种写法（避免 BOM 和编码问题）：\n" +
+      "\n" +
+      "    $path = \"{{CONFIG_PATH}}\"\n" +
+      "    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null\n" +
+      "    $payload = [ordered]@{\n" +
+      "      version   = 1\n" +
+      "      updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()\n" +
+      "      devices   = @($rows)   # $rows 是你构造的 PSCustomObject 数组\n" +
+      "    }\n" +
+      "    $json = $payload | ConvertTo-Json -Depth 6\n" +
+      "    [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))\n" +
+      "\n" +
+      "不要用 Out-File / Set-Content -Encoding utf8：Windows PowerShell 5.1 会写出 BOM，插件解析时会失败。\n" +
+      "\n" +
+      "【第 5 步：自检】\n" +
+      "    $raw = Get-Content -LiteralPath $path -Raw -Encoding utf8\n" +
+      "    $obj = $raw | ConvertFrom-Json\n" +
+      "    \"devices=$($obj.devices.Count) headphones=$(($obj.devices | Where-Object { $_.group -eq \u0027headphones\u0027 -and $_.direction -eq \u0027render\u0027 }).Count) bytes=$((Get-Item $path).Length)\"\n" +
+      "\n" +
+      "要求：JSON 能解析、devices 数量等于第 2 步脚本给出的数量、headphones 数量与你分组时的一致。\n" +
+      "\n" +
+      "【第 6 步：回报】\n" +
+      "告诉我三件事：共几台设备、其中几台耳机、文件写在哪个路径。如果第 5 步任何一项对不上，也告诉我具体哪个对不上。\n" +
+      "\n" +
+      "【禁止事项】\n" +
+      "- 不要修改插件目录里的任何文件。\n" +
+      "- 不要改插件设置（不要动 localStorage、不要调插件 API）。\n" +
+      "- 不要重命名设备、不要\"整理\"名字。\n" +
+      "- 不要用 Get-PnpDevice / Get-CimInstance / WMI 采集设备。\n" +
+      "- 如果你**写不进**那个路径（权限、沙箱、只读）：把第 4 步的 JSON 原文贴给我，并告诉我目标路径，我自己保存。";
+
+    const AUDIO_PROMPT_EN =
+      "````text\n" +
+      "I use the Better Notice plugin for DSH (DeepSeek Harness). It has a \"smart audio\" option: play a cue only when this computer\u0027s default output device is headphones. That decision needs a local \"audio device list\" file. Please generate it for me.\n" +
+      "\n" +
+      "Follow these 6 steps exactly. Do not skip steps and do not invent your own way to collect devices.\n" +
+      "\n" +
+      "[Environment]\n" +
+      "Windows 10 / 11. Run the commands in PowerShell.\n" +
+      "\n" +
+      "[Step 1: find the enumeration script]\n" +
+      "The absolute path of the script is (the plugin put it here; try this first):\n" +
+      "\n" +
+      "    {{SCRIPT_PATH}}\n" +
+      "\n" +
+      "Run `Test-Path -LiteralPath \"{{SCRIPT_PATH}}\"`. If it exists, **use it** and skip to step 2.\n" +
+      "\n" +
+      "Only if it does not exist, run this to find it yourself (the first hit is enough):\n" +
+      "\n" +
+      "    $found = @()\n" +
+      "    foreach ($root in @($env:DSH_HOME, \"$env:USERPROFILE\\.dsh\")) {\n" +
+      "      if (-not $root) { continue }\n" +
+      "      $direct = Join-Path $root \u0027node_modules\\dsh-better-notice\\tools\\audio-endpoint\\audio-devices.ps1\u0027\n" +
+      "      if (Test-Path -LiteralPath $direct) { $found += $direct }\n" +
+      "      $profiles = Join-Path $root \u0027profiles\u0027\n" +
+      "      if (Test-Path -LiteralPath $profiles) {\n" +
+      "        Get-ChildItem $profiles -Directory -ErrorAction SilentlyContinue | ForEach-Object {\n" +
+      "          $candidate = Join-Path $_.FullName \u0027node_modules\\dsh-better-notice\\tools\\audio-endpoint\\audio-devices.ps1\u0027\n" +
+      "          if (Test-Path -LiteralPath $candidate) { $found += $candidate }\n" +
+      "        }\n" +
+      "      }\n" +
+      "    }\n" +
+      "    $script = $found | Select-Object -First 1\n" +
+      "    $script\n" +
+      "\n" +
+      "If `$script` is still empty: **stop** and tell me \"audio-devices.ps1 not found\", plus the paths you searched.\n" +
+      "Do **not** write your own enumeration code. Do **not** use Get-PnpDevice / Get-CimInstance / WMI / SetupAPI — they are refused on this machine and you will just waste time.\n" +
+      "\n" +
+      "[Step 2: run it]\n" +
+      "Pick pwsh if present, otherwise powershell:\n" +
+      "\n" +
+      "    if (Get-Command pwsh -ErrorAction SilentlyContinue) { $exe = \u0027pwsh\u0027 } else { $exe = \u0027powershell.exe\u0027 }\n" +
+      "    & $exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script\n" +
+      "\n" +
+      "It prints exactly ONE line of JSON on stdout and exits 0. Shape:\n" +
+      "\n" +
+      "    {\"ok\":true,\"asOf\":1794512782766,\"elapsedMs\":1310,\"error\":null,\n" +
+      "     \"devices\":[{\"id\":\"…\",\"name\":\"Headphones (Baseus Bass BC2 Stereo)\",\"direction\":\"render\",\"formFactor\":3,\"kindGuess\":\"headphones\",\"guess\":false,\"state\":\"measured\"}]}\n" +
+      "\n" +
+      "- If ok=false, devices is empty and error says why: paste the error verbatim and stop.\n" +
+      "- If devices is an empty array: tell me and stop.\n" +
+      "\n" +
+      "[Step 3: group them]\n" +
+      "Assign each device a group using this table. Copy `name` verbatim — do not translate it, do not strip the model in parentheses, do not change its case:\n" +
+      "\n" +
+      "| condition | group | guess |\n" +
+      "|---|---|---|\n" +
+      "| direction is \"capture\" | capture | false |\n" +
+      "| kindGuess is \"headphones\" | headphones | false |\n" +
+      "| kindGuess is \"speakers\" | speakers | false |\n" +
+      "| kindGuess is \"unknown\" AND the name contains one of headphone / headset / earbud / airpod / bluetooth / 耳机 / 耳麦 / 蓝牙 (case-insensitive) | headphones | true |\n" +
+      "| anything else | other | false |\n" +
+      "\n" +
+      "Note: Bluetooth headsets often report no formFactor and land on row 4 — that is expected. Record guess=true rather than \"cleaning it up\" to look certain.\n" +
+      "\n" +
+      "[Step 4: write the file]\n" +
+      "Target path (absolute — use it as-is, do not change it):\n" +
+      "\n" +
+      "    {{CONFIG_PATH}}\n" +
+      "\n" +
+      "The content is UTF-8 **without BOM**:\n" +
+      "\n" +
+      "    {\n" +
+      "      \"version\": 1,\n" +
+      "      \"updatedAt\": <current Unix milliseconds>,\n" +
+      "      \"devices\": [\n" +
+      "        { \"name\": \"<verbatim device name>\", \"direction\": \"render\", \"group\": \"headphones\", \"kindGuess\": \"headphones\", \"guess\": false }\n" +
+      "      ]\n" +
+      "    }\n" +
+      "\n" +
+      "Fields:\n" +
+      "- version: always 1\n" +
+      "- updatedAt: current time in Unix **milliseconds** (not seconds)\n" +
+      "- devices: one entry per device, in any order\n" +
+      "- name / direction / kindGuess: copied verbatim from the script output\n" +
+      "- group: decided in step 3\n" +
+      "- guess: decided in step 3\n" +
+      "\n" +
+      "Write it this way (avoids BOM and encoding problems):\n" +
+      "\n" +
+      "    $path = \"{{CONFIG_PATH}}\"\n" +
+      "    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null\n" +
+      "    $payload = [ordered]@{\n" +
+      "      version   = 1\n" +
+      "      updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()\n" +
+      "      devices   = @($rows)   # $rows is the array of PSCustomObject you built\n" +
+      "    }\n" +
+      "    $json = $payload | ConvertTo-Json -Depth 6\n" +
+      "    [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))\n" +
+      "\n" +
+      "Do not use Out-File / Set-Content -Encoding utf8: Windows PowerShell 5.1 writes a BOM and the plugin will fail to parse it.\n" +
+      "\n" +
+      "[Step 5: verify]\n" +
+      "    $raw = Get-Content -LiteralPath $path -Raw -Encoding utf8\n" +
+      "    $obj = $raw | ConvertFrom-Json\n" +
+      "    \"devices=$($obj.devices.Count) headphones=$(($obj.devices | Where-Object { $_.group -eq \u0027headphones\u0027 -and $_.direction -eq \u0027render\u0027 }).Count) bytes=$((Get-Item $path).Length)\"\n" +
+      "\n" +
+      "Requirements: the JSON parses, the device count matches step 2, and the headphone count matches your grouping.\n" +
+      "\n" +
+      "[Step 6: report]\n" +
+      "Tell me three things: how many devices, how many of them are headphones, and the path you wrote. If any check in step 5 fails, tell me exactly which one.\n" +
+      "\n" +
+      "[Do not]\n" +
+      "- Do not modify anything inside the plugin directory.\n" +
+      "- Do not change plugin settings (no localStorage writes, no plugin API calls).\n" +
+      "- Do not rename devices or \"tidy up\" their names.\n" +
+      "- Do not enumerate devices with Get-PnpDevice / Get-CimInstance / WMI.\n" +
+      "- If you **cannot write** to that path (permissions, sandbox, read-only): paste the JSON from step 4 into the chat and tell me the target path — I will save it myself.\n" +
+      "````";
     /** Physical code of the manual popout key; `shortcuts.overlayKey` is its display string. */
     const OVERLAY_CODE = 'KeyS';
 
@@ -387,7 +866,7 @@ window.__ModuleLoader__.load({
           side: 'auto',
         },
         sound: {
-          enabled: ['error', 'pending', 'pinned', 'completed'].includes(category),
+          enabled: ['error', 'pending', 'completed'].includes(category),
           builtin: true,
           uploads: [],
         },
@@ -403,7 +882,7 @@ window.__ModuleLoader__.load({
     function defaultSettings() {
       return {
         version: SETTINGS_VERSION,
-        maxSeats: 6,
+        maxSeats: 7,
         scope: 'smart',
         positions: { tab: true, topbar: true, sidebar: true },
         topbar: { mode: 'chips', titleMode: 'custom', maxSeats: 6, previewInWeb: false, rightReservePx: TOPBAR_RESERVE.fallback, chipWidthPct: CHIP_PCT.fallback, customScope: defaultCustomScope() },
@@ -692,7 +1171,24 @@ window.__ModuleLoader__.load({
       'settings.ring.completedHint': '有会话刚结束时，整块屏幕提醒一次。',
       'settings.audio.smart': '只在耳机时响',
       'settings.audio.smartHint': '只有当前默认输出设备是耳机时才播提示音；不知道输出设备时不播。',
-      'settings.audio.needSetup': '需要初始化：首次使用会探测一次默认输出设备。',
+      'settings.audio.title': '设备清单',
+      'settings.audio.hint': '复制一段提示词交给你的 AI，它会枚举本机的音频设备并写好清单。',
+      'settings.audio.configure': '{配置}',
+      'settings.audio.reconfigure': '{重新配置}',
+      'settings.audio.copied': '已复制',
+      'settings.audio.copyFailed': '复制失败——已选中文本，按 Ctrl+C',
+      'settings.audio.recheck': '重新读取',
+      'settings.audio.recheckHint': 'AI 写完文件后点这里，不用关设置页。',
+      'settings.audio.path': '文件位置',
+      'settings.audio.pathHint': '在资源管理器地址栏粘贴这一行可直接打开所在文件夹。',
+      'settings.audio.copyPath': '复制路径',
+      'settings.audio.unsupported': '仅 Windows 可用',
+      'settings.audio.hostDown': '读不到状态',
+      'settings.audio.state.missing': '未初始化 · 按系统类型判断',
+      'settings.audio.state.ready': '已配置 {devices} 个（耳机 {headphones} 个）',
+      'settings.audio.state.empty': '已配置，但没标出耳机',
+      'settings.audio.state.invalid': '文件格式不对',
+      'settings.audio.guessed': '其中 {n} 个是推断的',
       'settings.order': '顺序',
       'settings.orderHint': '1–99，数字越小越靠前。',
       'settings.takeOverStatusDotOff': '已停用：dsh-sessions-manager 的状态点将恢复显示。',
@@ -891,7 +1387,24 @@ window.__ModuleLoader__.load({
       'settings.ring.completedHint': 'The whole screen reminds you once when a session just finished.',
       'settings.audio.smart': 'Headphones only',
       'settings.audio.smartHint': 'Only plays cues while the default output device is headphones; unknown output stays silent.',
-      'settings.audio.needSetup': 'Needs setup: a first probe of the default output device runs on use.',
+      'settings.audio.title': 'Device list',
+      'settings.audio.hint': 'Copy a prompt into your own AI; it enumerates this machine\'s audio devices and writes the list for you.',
+      'settings.audio.configure': '{Set up}',
+      'settings.audio.reconfigure': '{Set up again}',
+      'settings.audio.copied': 'Copied',
+      'settings.audio.copyFailed': 'Copy failed — the text is selected, press Ctrl+C',
+      'settings.audio.recheck': 'Read again',
+      'settings.audio.recheckHint': 'Click after your AI writes the file — no need to reopen settings.',
+      'settings.audio.path': 'File location',
+      'settings.audio.pathHint': 'Paste this line into an Explorer address bar to open the folder.',
+      'settings.audio.copyPath': 'Copy path',
+      'settings.audio.unsupported': 'Windows only',
+      'settings.audio.hostDown': 'Status unavailable',
+      'settings.audio.state.missing': 'Not set up · judging by device type',
+      'settings.audio.state.ready': 'Configured: {devices} devices ({headphones} headphones)',
+      'settings.audio.state.empty': 'Configured, but no headphone was marked',
+      'settings.audio.state.invalid': 'File is not readable',
+      'settings.audio.guessed': '{n} of them are inferred',
       'settings.order': 'Order',
       'settings.orderHint': '1–99, lower comes first.',
       'settings.takeOverStatusDotOff': 'Disabled: status dots from dsh-sessions-manager show again.',
@@ -1041,6 +1554,12 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     function choicesFromPatch(patch, base) {
       const next = { ...(isPlainObject(base.choices) ? base.choices : {}) };
       if (isPlainObject(patch) === false) return next;
+      if (typeof patch.maxSeats === 'number' && Number.isFinite(patch.maxSeats)) next.maxSeats = true;
+      if (isPlainObject(patch.topbar) && isPlainObject(patch.topbar.customScope)) {
+        for (const category of CATEGORY_IDS) {
+          if (typeof patch.topbar.customScope[category] === 'boolean') next['topbar.customScope.' + category] = true;
+        }
+      }
       if (isPlainObject(patch.positions) && typeof patch.positions.topbar === 'boolean') next['positions.topbar'] = true;
       if (isPlainObject(patch.collect) && typeof patch.collect.recentWindowMinutes === 'number') {
         next['collect.recentWindowMinutes'] = true;
@@ -1064,6 +1583,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           if (isPlainObject(glyph) === false) continue;
           for (const field of CHOICE_FIELDS) {
             if (Object.prototype.hasOwnProperty.call(glyph, field)) next[`categories.${category}.${slot}.${field}`] = true;
+          }
+        }
+        if (isPlainObject(change.surfaces)) {
+          for (const key of ['tab', 'sidebar', 'topbar']) {
+            if (typeof change.surfaces[key] === 'boolean') next['categories.' + category + '.surfaces.' + key] = true;
           }
         }
         if (isPlainObject(change.sound) && Object.prototype.hasOwnProperty.call(change.sound, 'enabled')) {
@@ -1154,7 +1678,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       if (SORT_BY.includes(raw.sortBy)) next.sortBy = raw.sortBy;
       if (isPlainObject(raw.surfaces)) {
         for (const key of ['tab', 'sidebar', 'topbar']) {
-          if (typeof raw.surfaces[key] === 'boolean') next.surfaces[key] = raw.surfaces[key];
+          if (typeof raw.surfaces[key] !== 'boolean') continue;
+          /** Same boundary as the presets: an unmarked value equal to an old default follows the default. */
+          const stale = isLegacyValue(legacyValuesOf('categories.' + category, 'surfaces.' + key), raw.surfaces[key]);
+          const chosen = picked['categories.' + category + '.surfaces.' + key] === true;
+          next.surfaces[key] = stale === true && chosen === false ? next.surfaces[key] : raw.surfaces[key];
         }
       }
       next.glyph = sanitizeGlyph(raw.glyph, next.glyph, raw, 'glyph', isChoiceIn('glyph'));
@@ -1189,7 +1717,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
            * default — unless the user is the one who switched it off, which the marker proves.
            */
           const enabledChosen = picked[`categories.${category}.sound.enabled`] === true;
-          next.sound.enabled = enabledChosen || isLegacyValue(legacyValuesOf('sound', 'enabled'), sound.enabled) === false ? sound.enabled : next.sound.enabled;
+          const legacyEnabled = [
+            ...legacyValuesOf('sound', 'enabled'),
+            ...legacyValuesOf('categories.' + category, 'sound.enabled'),
+          ];
+          next.sound.enabled = enabledChosen || isLegacyValue(legacyEnabled, sound.enabled) === false ? sound.enabled : next.sound.enabled;
         } else if (typeof sound.kind === 'string') next.sound.enabled = sound.kind !== 'none';
         if (typeof sound.builtin === 'boolean') next.sound.builtin = sound.builtin;
         else if (sound.kind === 'upload') next.sound.builtin = false;
@@ -1213,7 +1745,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
 
       if (raw.maxSeats === 'auto') next.maxSeats = 'auto';
       else if (typeof raw.maxSeats === 'number' && Number.isFinite(raw.maxSeats)) {
-        next.maxSeats = clamp(Math.round(raw.maxSeats), MAX_SEATS.min, MAX_SEATS.max);
+        const rounded = clamp(Math.round(raw.maxSeats), MAX_SEATS.min, MAX_SEATS.max);
+        /** Same boundary as the presets: an unmarked value equal to an old default follows the default. */
+        const stale = isLegacyValue(LEGACY_VALUES.maxSeats ?? [], rounded);
+        const chosen = next.choices.maxSeats === true;
+        next.maxSeats = stale === true && chosen === false ? next.maxSeats : rounded;
       }
       if (SCOPE_MODES.includes(raw.scope)) next.scope = raw.scope;
       if (isPlainObject(raw.positions)) {
@@ -1232,9 +1768,13 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         if (TOPBAR_TITLE_MODES.includes(titleMode)) next.topbar.titleMode = titleMode;
         if (isPlainObject(raw.topbar.customScope)) {
           for (const category of CATEGORY_IDS) {
-            if (typeof raw.topbar.customScope[category] === 'boolean') {
-              next.topbar.customScope[category] = raw.topbar.customScope[category];
-            }
+            if (typeof raw.topbar.customScope[category] !== 'boolean') continue;
+            /** Same boundary as the presets: an unmarked value equal to an old default follows the default. */
+            const stale = isLegacyValue(legacyValuesOf('topbar.customScope', category), raw.topbar.customScope[category]);
+            const chosen = next.choices['topbar.customScope.' + category] === true;
+            next.topbar.customScope[category] = stale === true && chosen === false
+              ? next.topbar.customScope[category]
+              : raw.topbar.customScope[category];
           }
         }
         if (raw.topbar.maxSeats === 'auto') next.topbar.maxSeats = 'auto';
@@ -1494,10 +2034,13 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
      * emoji side by side. Deliberately narrow — pictographs and regional indicators,
      * plus the variation selectors and ZWJ sequences that glue one emoji together.
      */
-    /** Every class starts inside the custom-icon scope, so a fresh install looks the same in all modes. */
+    /**
+     * Only 'pinned' starts inside the custom-icon scope: the user's clean profile keeps
+     * the band to pinned sessions and wants the category icon everywhere else.
+     */
     function defaultCustomScope() {
       const scope = {};
-      for (const category of CATEGORY_IDS) scope[category] = true;
+      for (const category of CATEGORY_IDS) scope[category] = category === 'pinned';
       return scope;
     }
 
@@ -3571,6 +4114,9 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       '.hl-input:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));outline-offset:1px}',
       '.hl-input[disabled]{opacity:.5;cursor:not-allowed}',
       '.hl-num{width:64px}',
+'.hl-audioState{display:inline-flex;align-items:center;height:26px;line-height:26px;font-size:12px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
+'.hl-audioPath{display:block;font-family:var(--ds-font-family-code);font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);user-select:all;word-break:break-all}',
+'.hl-audioFallback{width:100%;box-sizing:border-box;margin:2px 0 4px;padding:6px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l4);background:transparent;color:inherit;font-family:var(--ds-font-family-code);font-size:11px;line-height:16px}',
       '.hl-range{flex:1 1 auto;min-width:88px;height:26px;accent-color:var(--dsw-alias-state-business-primary)}',
       '.hl-emoji{width:64px;text-align:center;font-size:15px}',
       '.hl-select{height:28px;min-width:88px;padding:0 6px;border-radius:7px;border:1px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px}',
@@ -3765,11 +4311,25 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       const [settings, setSettings] = React.useState(() => snapshot());
       const [openCards, setOpenCards] = React.useState(() => readOpenCards());
       const [uploadError, setUploadError] = React.useState(null);
+      const [, setAudioTick] = React.useState(0);
+      const [audioNote, setAudioNote] = React.useState('');
+      const [audioFallback, setAudioFallback] = React.useState('');
+      const [audioPathOpen, setAudioPathOpen] = React.useState(false);
 
 
       React.useEffect(() => onSettingsChange(setSettings), []);
       React.useEffect(() => {
         injectPageCss();
+      }, []);
+
+      /** The row re-renders when an answer lands, and asks for one on mount. */
+      React.useEffect(() => {
+        const bump = () => setAudioTick((value) => value + 1);
+        audioConfigListeners.add(bump);
+        refreshAudioConfig();
+        return () => {
+          audioConfigListeners.delete(bump);
+        };
       }, []);
 
       const patch = (next) => setSettings(writeSettings(next));
@@ -4155,13 +4715,160 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
        * inside it: sounds play under you, the ring covers the screen, and the
        * three switches are the whole feature's user-facing surface.
        */
+      /**
+       * The device-list row. Its state word is derived from the last host answer
+       * (`audioConfigStateOf`), so a failed read can never keep a stale
+       * "configured" line. The three controls are real buttons so Tab reaches
+       * them in visual order; nothing here opens a file picker, because a browser
+       * never hands out a local absolute path.
+       */
+      const audioStatusText = (status, config) => {
+        if (status === 'ready' && config !== null) {
+          const base = t('settings.audio.state.ready', {
+            devices: config.deviceCount,
+            headphones: config.headphoneCount,
+          });
+          return config.guessCount > 0 ? `${base} · ${t('settings.audio.guessed', { n: config.guessCount })}` : base;
+        }
+        if (status === 'unsupported') return t('settings.audio.unsupported');
+        if (status === 'hostDown') return t('settings.audio.hostDown');
+        return t(`settings.audio.state.${status}`);
+      };
+
+      const audioHintText = (status) => {
+        if (status === 'unsupported') return t('settings.audio.unsupported');
+        if (status === 'hostDown') return t('settings.audio.hostDown');
+        if (status === 'invalid') return t('settings.audio.recheckHint');
+        return t('settings.audio.hint');
+      };
+
+      const flashAudioNote = (note) => {
+        setAudioNote(note);
+        if (audioNoteTimer !== null) clearTimeout(audioNoteTimer);
+        audioNoteTimer = setTimeout(() => {
+          audioNoteTimer = null;
+          setAudioNote('');
+        }, 1500);
+      };
+
+      const copyAudioPrompt = () => {
+        const text = audioPromptText(t, audioConfig);
+        copyPromptText(text).then((copied) => {
+          if (copied === true) {
+            setAudioFallback('');
+            flashAudioNote('copied');
+            /** A copied prompt is the moment the file may be about to change. */
+            if (audioConfigStateOf(audioConfig) === 'invalid') refreshAudioConfig();
+            return;
+          }
+          setAudioFallback(text);
+          flashAudioNote('failed');
+        });
+      };
+
+      const copyAudioPath = () => {
+        const path = audioConfig !== null && typeof audioConfig.path === 'string' ? audioConfig.path : '';
+        if (path === '') return;
+        copyPromptText(path).then((copied) => {
+          flashAudioNote(copied === true ? 'copied' : 'failed');
+        });
+      };
+
+      const audioConfigRow = () => {
+        const status = audioConfigStateOf(audioConfig);
+        const config = audioConfig;
+        const invalid = status === 'invalid';
+        const controls = [
+          h('span', {
+            key: 'state',
+            className: 'hl-audioState',
+            'data-hotlist-audio-state': status,
+            title: audioStatusText(status, config),
+          }, audioStatusText(status, config)),
+        ];
+        if (status !== 'unsupported') {
+          controls.push(h('button', {
+            key: 'configure',
+            type: 'button',
+            className: 'hl-step',
+            'data-hotlist-audio': 'configure',
+            disabled: audioNote === 'copied',
+            onClick: copyAudioPrompt,
+          }, invalid === true ? t('settings.audio.reconfigure') : t('settings.audio.configure')));
+          controls.push(h('button', {
+            key: 'recheck',
+            type: 'button',
+            className: 'hl-link',
+            'data-hotlist-audio': 'recheck',
+            title: t('settings.audio.recheckHint'),
+            onClick: () => refreshAudioConfig(),
+          }, t('settings.audio.recheck')));
+        }
+        if (status !== 'unsupported' && status !== 'hostDown') {
+          controls.push(h('button', {
+            key: 'path',
+            type: 'button',
+            className: 'hl-link',
+            'data-hotlist-audio': 'path',
+            'aria-expanded': audioPathOpen === true ? 'true' : 'false',
+            onClick: () => setAudioPathOpen(audioPathOpen !== true),
+          }, t('settings.audio.path')));
+        }
+        const nodes = [
+          h('div', { key: 'row', className: 'hl-row', 'data-hotlist-row': 'audio.config' }, [
+            h('div', { key: 'main', className: 'hl-rowMain' }, [
+              h('span', { key: 'title', className: 'hl-rowTitle' }, t('settings.audio.title')),
+              h('span', { key: 'hint', className: 'hl-rowHint' }, audioHintText(status)),
+            ]),
+            h('div', { key: 'control', className: 'hl-fieldControl' }, controls),
+          ]),
+          h('span', {
+            key: 'note',
+            className: 'hl-rowHint',
+            'aria-live': 'polite',
+            'data-hotlist-audio': 'note',
+          }, audioNote === 'copied' ? t('settings.audio.copied') : audioNote === 'failed' ? t('settings.audio.copyFailed') : ''),
+        ];
+        if (audioPathOpen === true && config !== null && status !== 'unsupported' && status !== 'hostDown') {
+          nodes.push(h('div', { key: 'pathRow', className: 'hl-row', 'data-hotlist-row': 'audio.path' }, [
+            h('div', { key: 'main', className: 'hl-rowMain' }, [
+              h('code', { key: 'path', className: 'hl-audioPath' }, typeof config.path === 'string' ? config.path : ''),
+              h('span', { key: 'hint', className: 'hl-rowHint' }, t('settings.audio.pathHint')),
+              h('code', { key: 'directory', className: 'hl-audioPath' }, typeof config.directory === 'string' ? config.directory : ''),
+            ]),
+            h('div', { key: 'control', className: 'hl-fieldControl' }, h('button', {
+              key: 'copyPath',
+              type: 'button',
+              className: 'hl-link',
+              'data-hotlist-audio': 'copy-path',
+              onClick: copyAudioPath,
+            }, t('settings.audio.copyPath'))),
+          ]));
+        }
+        if (audioFallback !== '') {
+          nodes.push(h('textarea', {
+            key: 'fallback',
+            className: 'hl-audioFallback',
+            'data-hotlist-audio': 'fallback',
+            readOnly: true,
+            autoFocus: true,
+            rows: 6,
+            value: audioFallback,
+            onFocus: (event) => {
+              if (event?.target && typeof event.target.select === 'function') event.target.select();
+            },
+          }));
+        }
+        return nodes;
+      };
+
       const ringSection = () => h('section', { key: 'ring', className: 'hl-global', 'data-hotlist-ring': '' }, [
         h('h3', { key: 'title', className: 'hl-groupTitle' }, t('settings.group.ring')),
         switchRow('ring.pending', t('settings.ring.pending'), t('settings.ring.pendingHint'), settings.ring.pending === true, () => patch({ ring: { ...settings.ring, pending: settings.ring.pending !== true } })),
         switchRow('ring.error', t('settings.ring.error'), t('settings.ring.errorHint'), settings.ring.error === true, () => patch({ ring: { ...settings.ring, error: settings.ring.error !== true } })),
         switchRow('ring.completed', t('settings.ring.completed'), t('settings.ring.completedHint'), settings.ring.completed === true, () => patch({ ring: { ...settings.ring, completed: settings.ring.completed !== true } })),
         switchRow('audio.smart', t('settings.audio.smart'), t('settings.audio.smartHint'), settings.audio.smart === true, () => patch({ audio: { ...settings.audio, smart: settings.audio.smart !== true } })),
-        h('p', { key: 'audioNote', className: 'hl-rowHint' }, t('settings.audio.needSetup')),
+        audioConfigRow(),
       ]);
 
       const globalSection = () => h('section', { key: 'global', className: 'hl-global', 'data-hotlist-global': '' }, [
@@ -5002,10 +5709,25 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
      * speakers. `probe` is `{ ...payload, at }` where `at` is when the client
      * fetched it; a probe older than `AUDIO_PROBE_TTL_MS` is as good as none.
      */
-    function audioGateAllowed(settings, probe, at) {
+    function audioGateAllowed(settings, probe, at, config) {
       if (settings?.audio?.smart !== true) return { allow: true, reason: null };
+      /** The platform comes from the host's `process.platform`, never from the title strip. */
+      if (config !== null && config !== undefined && config.platform !== 'win32') {
+        return { allow: false, reason: 'audio-unknown' };
+      }
       if (probe === null || at - probe.at > AUDIO_PROBE_TTL_MS) return { allow: false, reason: 'audio-unknown' };
       if (probe.state !== 'measured' || probe.error != null) return { allow: false, reason: 'audio-unknown' };
+      /**
+       * A usable list is a whitelist: the default output has to be one of the
+       * devices it calls a headphone. No list (or no headphones in it) falls
+       * through to the probe's own device type, which is what task-77 shipped.
+       */
+      const listed = listedHeadphones(config);
+      if (listed !== null && listed.length > 0) {
+        const name = probe.name;
+        const hit = typeof name === 'string' && listed.some((device) => deviceNameMatches(device.name, name));
+        return hit ? { allow: true, reason: null } : { allow: false, reason: 'not-headphones' };
+      }
       if (probe.kindGuess !== 'headphones') return { allow: false, reason: 'not-headphones' };
       return { allow: true, reason: null };
     }
@@ -5015,6 +5737,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       const createAudio = options.createAudio;
       const log = typeof options.log === 'function' ? options.log : () => {};
       const fetchProbe = typeof options.fetchProbe === 'function' ? options.fetchProbe : null;
+      const getConfig = typeof options.getConfig === 'function' ? options.getConfig : () => audioConfig;
       /** sessionId -> category announced last round: re-entry replays, repaint does not. */
       const seen = new Map();
       let armed = false;
@@ -5042,7 +5765,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       const probeState = () => {
         const settings = getSettings();
         const at = Date.now();
-        const verdict = audioGateAllowed(settings, audioProbe, at);
+        const verdict = audioGateAllowed(settings, audioProbe, at, getConfig());
         return {
           smart: settings?.audio?.smart === true,
           state: audioProbe === null ? 'unknown' : audioProbe.state,
@@ -5051,6 +5774,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           error: audioProbe === null ? null : audioProbe.error ?? null,
           asOf: audioProbe === null ? 0 : audioProbe.at,
           pass: verdict.allow,
+          config: audioConfigSummary(),
         };
       };
 
@@ -5073,7 +5797,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         }
         /** The smart gate runs before the throttle: a skipped cue must not consume the window. */
         if (settings?.audio?.smart === true) {
-          const verdict = audioGateAllowed(settings, audioProbe, at);
+          const verdict = audioGateAllowed(settings, audioProbe, at, getConfig());
           if (verdict.allow === false) {
             log('skip', verdict.reason);
             if (audioProbe === null || at - audioProbe.at > AUDIO_PROBE_TTL_MS) refreshProbe();
@@ -6862,7 +7586,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         });
         soundPreview = (category) => sound?.preview(category) === true;
         /** Warm the probe once at boot and on the same cadence the host caches it. */
-        const warm = () => { if (readSettings().audio?.smart === true) sound?.prefetch(); };
+        const warm = () => {
+          if (readSettings().audio?.smart === true) sound?.prefetch();
+          /** Same cadence as the probe: the row must notice a file written behind it. */
+          refreshAudioConfig();
+        };
         warm();
         const audioTimer = setInterval(warm, AUDIO_PROBE_TTL_MS);
         return () => {
@@ -6986,7 +7714,12 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             preview: (category) => soundPreview(category),
           }),
           /** Read-only audio-endpoint probe; `null` before the sound effect mounts. */
-          audio: () => (sound === null ? null : sound.probeState()),
+          audio: () => ({
+            ...(sound === null
+              ? { smart: false, state: 'unknown', kindGuess: 'unknown', name: null, error: null, asOf: 0, pass: true }
+              : sound.probeState()),
+            config: audioConfigSummary(),
+          }),
           /** Read-only probe for the acceptance run; see `docs/ARCHITECTURE.md` §18. */
           topbar: () => ({
             mounted: topbarEntry !== null,
@@ -7123,6 +7856,20 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       audioGateAllowed,
       AUDIO_PROBE_TTL_MS,
       AUDIO_ROUTE,
+      AUDIO_CONFIG_ROUTE,
+      AUDIO_CONFIG_TIMEOUT_MS,
+      AUDIO_DEVICE_GROUPS,
+      AUDIO_DEVICE_MIN_MATCH,
+      AUDIO_PROMPT_EN,
+      AUDIO_PROMPT_ZH,
+      audioConfigStateOf,
+      audioConfigSummary,
+      audioPromptText,
+      copyPromptText,
+      deviceNameMatches,
+      listedHeadphones,
+      normDeviceName,
+      refreshAudioConfig,
       createRingPlayer,
       RING_CATEGORIES,
       RING_OPTIONS,

@@ -6,7 +6,7 @@
 > this package instead of writing a new plugin.
 
 npm: dsh-better-notice
-version: 5.3.0
+version: 5.3.1
 license: MIT
 repo: https://github.com/MeruSu/better-notice
 docs: https://github.com/MeruSu/better-notice/blob/main/docs/ARCHITECTURE.md
@@ -16,7 +16,7 @@ docs: https://github.com/MeruSu/better-notice/blob/main/docs/ARCHITECTURE.md
     dsh plugin --profile <profile> add dsh-better-notice
 
 Then restart that profile's GUI (a `client.js`-only change may just reload the
-page). Verify: `window.__HOTLIST_VERSION__ === "5.3.0"` and a "热表 / Better
+page). Verify: `window.__HOTLIST_VERSION__ === "5.3.1"` and a "热表 / Better
 Notice" section appears in Settings.
 
 ## What it does
@@ -50,8 +50,8 @@ States, one per session, judged in this order (highest wins):
 - `idle` = active within the global "recent window" (1-120 min, default 17)
 
 Who shows where (a session is drawn on exactly one of the two seat surfaces):
-`error` / `pending` / `completed` on the window top bar, `pinned` / `idle` in
-the tab row, `running` on neither.
+`error` / `pending` / `completed` on the window top bar, `pinned` / `idle` /
+`running` in the tab row (`running` moved to the tab row in 5.3.1).
 
 ## Public API (page context)
 
@@ -61,7 +61,7 @@ the tab row, `running` on neither.
       assets:   { add, list, clear, preview },
       topbar(),          // read-only probe: mounted/mode/titleMode/left/chips
       export(opts),      // session list as md | txt | json (bare call works)
-      audio(),           // read-only headphone gate: smart/state/kindGuess/name/error/asOf/pass
+      audio(),           // read-only headphone gate: smart/state/kindGuess/name/error/asOf/pass + config summary
     }
 
 - `settings.set(patch)` is a shallow merge per level — `{glyph:{size:24}}` will
@@ -77,6 +77,21 @@ the tab row, `running` on neither.
   already present in the session title, so a name never shows two emoji.
   Old values `unified` / `two` / `smart` / `auto` are aliased automatically.
 - `topbar.customScope.<category>` (six booleans) only applies in `custom` mode.
+  Default since 5.3.1: only `pinned` is `true` — the band is the pinned row by
+  default, so every category borrowing the title emoji would make pills look
+  like user text.
+- `audio().config` is the device-list summary: `{ status, exists, valid, path,
+  script, platform, deviceCount, headphoneCount, guessCount, updatedAt }`, with
+  `status` one of `missing | ready | empty | invalid | unsupported | hostDown`.
+  The list itself lives at `<DSH_HOME>\hotlist-audio.json` (a file outside
+  `localStorage`); the page never writes or builds that path — the host resolves
+  it and returns the absolute path. A configured list acts as a **whitelist**:
+  with headphones in it, the current default output must match one of them by
+  name or the cue stays silent; no list / unreadable list / no headphones fall
+  back to the device-type judgement. Since 5.3.1 the factory defaults are
+  `maxSeats 7`, `categories.running.surfaces.tab true`,
+  `categories.pinned.sound.enabled false`, and `topbar.customScope` = `pinned`
+  only.
 - `export({ format })` takes `md` | `txt` | `json` (not `markdown`); explicit
   `ids` win over `scope`. `md`/`txt` carry a BOM, `json` does not.
 
@@ -101,7 +116,7 @@ the tab row, `running` on neither.
 
     node --check client.js
     node --check index.js
-    node test/classify.test.mjs      # expect: PASS — 115 groups
+    node test/classify.test.mjs      # expect: PASS — 121 groups
 
 ## Known limits
 
@@ -113,10 +128,12 @@ the tab row, `running` on neither.
 - `topbar.mode` and `topbar.rightReservePx` have no settings-page row (field only,
   API-writable); the window-control guard of 138 px is hard-coded.
 - The headphones gate (`audio.smart`, off by default) is strict and Windows-only: a cue
-  plays only when a probe *measured* the default output as headphones; probe failed,
-  timed out, no `pwsh`, or not Windows → silent. It gates **automatic** cues only — the
-  play button in Settings always plays. `__HOTLIST__.audio()` reports
-  `{ smart, state, kindGuess, name, error, asOf, pass }`.
+  plays only when a probe *measured* the default output as headphones — or, since 5.3.1,
+  when a configured device list exists and the current output matches a listed
+  headphone by name; probe failed, timed out, no `pwsh`, not Windows, or no name
+  match → silent. It gates **automatic** cues only — the play button in Settings
+  always plays. `__HOTLIST__.audio()` reports
+  `{ smart, state, kindGuess, name, error, asOf, pass, config }`.
 - Static routes are unauthenticated — publish public assets only.
 - On desktop, the top 40 px of the window is the window-drag region.
 - The super reminder is Windows-only (PowerShell + WPF) and covers the primary

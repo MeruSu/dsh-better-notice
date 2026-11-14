@@ -3,7 +3,7 @@
 This file is for AI coding agents. It says what this plugin already does, so you
 do not rebuild it, and what will break the host if you get it wrong.
 
-- Package: `dsh-better-notice` · version `5.3.0` · MIT
+- Package: `dsh-better-notice` · version `5.3.1` · MIT
 - Host: DeepSeek Harness (DSH) Web UI
 - One command to install: `dsh plugin --profile <profile> add dsh-better-notice`
 - One-page summary for scrapers: [llms.txt](llms.txt) · human docs: [README.md](README.md)
@@ -20,17 +20,18 @@ finished, which one failed.
 
 | Surface | What you see | Where the code lives |
 |---|---|---|
-| Conversation tab row | one tab seat per hot session; click switches to it | `mountTabSeats` (`client.js:5667`) |
-| Left session sidebar | one glyph before each row title, optionally animated | `createSidebarAdapter` / `sidebarStateOf` (`client.js:3014` / `2955`) |
-| Window top bar (**Windows desktop**, new in v5) | a row of session pills in the 40 px title strip, next to the tab row | `mountTopbar` (`client.js:6363`) |
-| On state change | a sound and/or a popout picture | `createSoundPlayer` (`client.js:5013`) · `mountPopout` (`client.js:4444`) |
-| On state change (**opt-in**) | a super-reminder clip (or the older amber ring), drawn by a separate process | `createRingPlayer` (`client.js:5160`) · `serveRing` (`index.js:167`) |
+| Conversation tab row | one tab seat per hot session; click switches to it | `mountTabSeats` (`client.js:6391`) |
+| Left session sidebar | one glyph before each row title, optionally animated | `createSidebarAdapter` / `sidebarStateOf` (`client.js:3557` / `2955`) |
+| Window top bar (**Windows desktop**, new in v5) | a row of session pills in the 40 px title strip, next to the tab row | `mountTopbar` (`client.js:7087`) |
+| On state change | a sound and/or a popout picture | `createSoundPlayer` (`client.js:5735`) · `mountPopout` (`client.js:5151`) |
+| On state change (**opt-in**) | a super-reminder clip (or the older amber ring), drawn by a separate process | `createRingPlayer` (`client.js:5884`) · `serveRing` (`index.js:167`) |
 
 **Who is drawn where** (`buildSeatPlan()` takes a `surface` argument): `error` /
-`pending` / `completed` go to the window top bar, `pinned` / `idle` go to the tab
-row, `running` goes to neither. The two seat surfaces coexist — turning the band
-on does **not** hide the tab row, it narrows it to the categories it owns. The
-sidebar is independent and shows all six.
+`pending` / `completed` go to the window top bar, `pinned` / `idle` / `running`
+go to the tab row (since 5.3.1; before that `running` sat on neither). The two
+seat surfaces coexist — turning the band on does **not** hide the tab row, it
+narrows it to the categories it owns. The sidebar is independent and shows all
+six.
 
 **Six states, judged in this order — highest wins, a session belongs to exactly one:**
 
@@ -47,8 +48,8 @@ error  >  pending  >  completed  >  running  >  pinned  >  idle
 | `pinned` | pinned **in the host's own UI** — read from `pinnedSessionIds`, never stored by this plugin | no | — |
 | `idle` | active within the global recent window | no | — |
 
-The two functions that decide this are `classify()` (`client.js:2103-2161`) and
-`sidebarStateOf()` (`client.js:2976-3012`). They share the same order but apply
+The two functions that decide this are `classify()` (`client.js:2646-2704`) and
+`sidebarStateOf()` (`client.js:3519-3555`). They share the same order but apply
 different extra conditions (the sidebar has an error TTL and honours
 `completionUnread`). Change both, or you get two different answers for the same
 session on two surfaces.
@@ -56,14 +57,14 @@ session on two surfaces.
 **Default display order** (`CATEGORY_ORDER`, `client.js:185`):
 `error 10 · pending 10 · pinned 60 · completed 20 · running 30 · idle 50`.
 
-**Hard row cap:** `PLAN_MAX_ROWS = 37` (`client.js:297`). Rows past it are cut
+**Hard row cap:** `PLAN_MAX_ROWS = 37` (`client.js:312`). Rows past it are cut
 from the tail — the priority head always survives. `plan.overflow` reports how
 many were dropped.
 
-**Settings are never overwritten.** `sanitizeSettings()` (`client.js:1209`) is
+**Settings are never overwritten.** `sanitizeSettings()` (`client.js:1741`) is
 pure and falls back per field, never wholesale. Unknown keys go to
 `PRESERVED_KEY` (`client.js:169`) and come back on the next read; out-of-range
-values come back too (`outOfRangeOf`, `client.js:1713`); the last five writes
+values come back too (`outOfRangeOf`, `client.js:2256`); the last five writes
 are kept as a rolling backup ring under `BACKUP_KEY` (`client.js:171`,
 `BACKUP_LIMIT = 5`). There is deliberately **no `SETTINGS_VERSION` bump** for
 cosmetic changes — a version bump means writing a migration, and a wrong
@@ -71,11 +72,14 @@ migration silently wipes user data.
 
 **One exception: our own factory presets are ours.** A stored value that still
 equals a default an earlier release shipped — `💤` for the idle glyph,
-`blink`/`none` motion, `motionTarget: 'glyph'`, frequency `1`, sound off — is
-not a user choice, so it follows the current default (`LEGACY_VALUES`,
-`client.js:214`). A value the user actually picked is recorded in `choices`
-(`client.js:1988`, written by `writeSettings()` from the incoming patch
-only) and the preset rule never touches it; `resetSettings()` clears the map.
+`blink`/`none` motion, `motionTarget: 'glyph'`, frequency `1`, sound off, or any
+of the four 5.3.1 default moves (`maxSeats 6`, `running.surfaces.tab false`,
+`pinned.sound.enabled true`, any `topbar.customScope` entry `true` except
+`pinned`) — is not a user choice, so it follows the current default
+(`LEGACY_VALUES`, `client.js:214`). A value the user actually picked is recorded
+in `choices` (`client.js:2531`, written by `writeSettings()` from the incoming
+patch only) and the preset rule never touches it; `resetSettings()` clears the
+map.
 
 ---
 
@@ -126,7 +130,7 @@ authenticated** — publish public assets only, never user data.
 
 ```js
 window.__HOTLIST__ = {
-  version,                                              // "5.3.0"
+  version,                                              // "5.3.1"
   settings: { get, set, reset, subscribe, backups, restore },
   assets:   { add, list, clear, preview },
   audio,                                                // read-only headphone-gate probe
@@ -147,9 +151,12 @@ window.__HOTLIST__ = {
 - `assets.preview(category)` → plays the sound for that category now. Bypasses the
   cold-start gate, the 1500 ms throttle **and the headphones gate** — it is a user
   click, so it must always be audible even on speakers.
-- `audio()` → `{ smart, state, kindGuess, name, error, asOf, pass }`, or `null` before
+- `audio()` → `{ smart, state, kindGuess, name, error, asOf, pass, config }`, or `null` before
   the sound player mounts. `pass` is what the gate would answer right now; switch off
-  → always `true`. Use it instead of guessing why a cue went silent.
+  → always `true`. `config` is the device-list summary — `{ status, exists, valid,
+  path, script, platform, deviceCount, headphoneCount, guessCount, updatedAt }`,
+  `status` ∈ `missing | ready | empty | invalid | unsupported | hostDown`. Use it
+  instead of guessing why a cue went silent or a configured list is ignored.
 - `topbar()` → read-only probe: `{ mounted, mode, titleMode, left, leftSource,
   measured, reserve, currentId, capacity, chips }`.
 - `export(opts)` → session list as `md` | `txt` | `json`; explicit `ids` win over
@@ -157,18 +164,22 @@ window.__HOTLIST__ = {
 - There is **no** `settings.defaults` on this object (`window.__HOTLIST_SETTINGS__`
   is the one that has `defaults()`).
 
-Global settings keys: `maxSeats` (1–12, no auto mode in the UI), `pinned.maxSeats` (0–12, default 3),
+Global settings keys: `maxSeats` (1–12, no auto mode in the UI; default 7 since 5.3.1), `pinned.maxSeats` (0–12, default 3),
 `collect.completedTtlMs` (1–1440 min), `collect.recentWindowMinutes`
 (UI 1–120, storage/API 0–120, default 17), `sound.volume` (0–100),
 `positions.{tab,sidebar,topbar}` (all three are real now; `topbar` defaults to
 `true` and only draws on Windows), `scope` (`workspace` | `all` | `smart`),
-`takeOverStatusDot`.
+`takeOverStatusDot`. Per-category defaults worth knowing since 5.3.1:
+`categories.running.surfaces.tab` is `true` (running got a tab seat),
+`categories.pinned.sound.enabled` is `false` (pinned ships silent).
 
 Top bar keys: `topbar.{mode, titleMode, maxSeats, previewInWeb, rightReservePx,
 chipWidthPct, customScope}`. `titleMode` ∈ `text` | `icon` | `custom` (old names
 `unified` / `two` / `smart` / `auto` are aliased); `chipWidthPct` is a
 **percentage** `-30…+30`, `0` = unchanged; `customScope` applies only in `custom`
-mode. All three title modes strip the emoji already in the session title, so a
+mode (default since 5.3.1: only `pinned` is `true` — the band is the pinned row,
+so every category borrowing the title emoji would make pills look like user text).
+All three title modes strip the emoji already in the session title, so a
 name never renders two emoji.
 
 ---
@@ -186,7 +197,7 @@ assets/                error|pending|completed × 4 **static** webp tiers (681 K
 assets/sounds/         attention.wav, complete.wav (+ their manifest)
 docs/ARCHITECTURE.md   layering, state model, settings schema, line-number index
 docs/EXTENDING.md      API surface + how to extend without breaking data
-docs/TESTING.md        the 115 test groups, each with its source line
+docs/TESTING.md        the 121 test groups, each with its source line
 test/classify.test.mjs the whole self-test (pure node, no browser)
 tools/attn-ring/       super-reminder script + media/{smack,wave}.gif + build-media.py — SHIPS in the package
 tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell) — SHIPS in the package
@@ -199,7 +210,7 @@ tools/meru-tts/        optional TTS helper; repo only, NOT in the package (~1.6 
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs      # expect: PASS — 115 groups
+node test/classify.test.mjs      # expect: PASS — 121 groups
 ```
 
 `node --check` alone is not enough: a deleted-but-still-referenced constant is
@@ -249,7 +260,7 @@ Git may not be under `C:\Program Files\Git`. Ask the tool itself:
    stays down unless `topbar.previewInWeb` is on. macOS is not supported and will
    not be. The band and the tab row **coexist**: each category owns one surface
    (§1), so a session is never drawn twice — the tab row is not hidden, it is
-   narrowed to `pinned` / `idle`.
+   narrowed to `pinned` / `idle` / `running`.
 3. `.mp3` / `.wav` cannot be served by the package-asset route (see 2.3).
 4. Static asset routes are unauthenticated (see 2.3).
 5. On desktop the top 40 px of the window is the window-drag region; never give

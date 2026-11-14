@@ -13,7 +13,7 @@ dsh plugin --profile <profile> add dsh-better-notice
 ```
 
 - 包名：`dsh-better-notice`（模块 id 与包名相同）
-- 版本：`5.3.0`（见 [CHANGELOG.md](CHANGELOG.md)）
+- 版本：`5.3.1`（见 [CHANGELOG.md](CHANGELOG.md)）
 - 许可：MIT
 - 设置位置：**账号菜单 →「设置」→ 左导航「热表」**（`settings.section`，id `hotlist`，order `30`）
 
@@ -98,12 +98,12 @@ dsh plugin --profile <profile> add dsh-better-notice
 | ⛔ `error` | Agent 报错（`api-session/error`），10 分钟后过期 | — | ✅ | ✅ | ✅ | 🔈 |
 | 🔐 `pending` | 等你审批 / 等你回答 / 等你过方案（副图标 ❓） | — | ✅ | ✅ | ✅ | 🔈 |
 | ✅ `completed` | 本插件看到它跑完，7 分钟内 | — | ✅ | ✅ | ✅ | 🔈 |
-| ⏳ `running` | 正在干活（含「子代理在跑、父会话空闲」） | — | — | ✅ | — | — |
-| 🧊 `idle` | 空闲，且最后活动在「最近窗口」内（默认 5 分钟） | ✅ | — | ✅ | — | — |
+| ⏳ `running` | 正在干活（含「子代理在跑、父会话空闲」） | ✅ | — | ✅ | — | — |
+| 🧊 `idle` | 空闲，且最后活动在「最近窗口」内（默认 17 分钟） | ✅ | — | ✅ | — | — |
 
 ✅ = 默认开 · — = 默认关 · 🔈 = 有内置音效，但**不打开那一类就不会响**。
 
-两个座位面是**分家**的（见[窗口顶栏](#窗口顶栏windows-桌面)）：`pinned` / `idle` 占 tab 行座位，`error` / `pending` / `completed` 占顶栏胶囊，`running` 两个面都不占——同一个会话不会画两遍。六个类别在侧栏都有图标。
+两个座位面是**分家**的（见[窗口顶栏](#窗口顶栏windows-桌面)）：`pinned` / `idle` / `running` 占 tab 行座位，`error` / `pending` / `completed` 占顶栏胶囊——同一个会话不会画两遍。六个类别在侧栏都有图标。（`running` 是 5.3.1 起才进 tab 行的；之前两个座位面都不占，等于「正在跑的会话在 tab 行里看不见」。）
 
 ### 一个会话是怎么归类的
 
@@ -131,7 +131,7 @@ dsh plugin --profile <profile> add dsh-better-notice
 dsh --profile <profile>
 ```
 
-- **已发布到 npm：**[dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice)（当前 `5.3.0`）。如果 npm 拉不动，同样的 tarball 也附在[最新 Release](https://github.com/MeruSu/better-notice/releases) 里——`dsh plugin --profile <profile> add <绝对路径>/dsh-better-notice-5.3.0.tgz`，效果一样，同样要重启。
+- **已发布到 npm：**[dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice)（当前 `5.3.1`）。如果 npm 拉不动，同样的 tarball 也附在[最新 Release](https://github.com/MeruSu/better-notice/releases) 里——`dsh plugin --profile <profile> add <绝对路径>/dsh-better-notice-5.3.1.tgz`，效果一样，同样要重启。
 - 从**本地目录**安装时要用**绝对路径、正斜杠**：`dsh plugin` 是把参数在 profile 目录里转交给 pnpm 的，相对路径会指到 profile 里去。
 - 装目录用的是 `link:`，之后改代码不用重装：`client.js` 改完刷新页面即生效；`index.js` / `cordis.patch.yml` / `package.json` 改完要重启 GUI。
 - 想连 TTS 小工具一起用就装 git 仓库（见[提示音](#提示音与仓库自带的-tts-工具)）。npm 包的 `files` 带 `index.js`、`client.js`、`cordis.patch.yml`、`assets`、`locale`、`icon.svg`、`tools/attn-ring` 和 `tools/audio-endpoint`；`tools/meru-tts` **不在包里**。
@@ -156,7 +156,7 @@ host 路由在进程启动时创建，只刷新页面不够。
 
 在 GUI 的浏览器控制台里依次确认：
 
-1. `window.__HOTLIST_VERSION__` → 版本号，例如 `'5.3.0'`；
+1. `window.__HOTLIST_VERSION__` → 版本号，例如 `'5.3.1'`；
 2. `Object.keys(window.__HOTLIST__)` → `['version','settings','assets']`；
 3. 打开设置，左导航有**「热表」**，页面里是一块全局区 + **6** 张可折叠的类别卡；
 4. 侧栏的会话行前面出现了状态图标；
@@ -209,7 +209,7 @@ Windows 上的 GUI 顶部有一条 40px 标题带。插件可以往里面画一�
 - 这条带是 `pointer-events:none` 的透明浮层，只有胶囊自己收点击并标了 `-webkit-app-region:no-drag`，所以**拖拽带照旧能拖**。那 40px 属于窗口，不属于插件。
 - 左边界用命中测试（`elementsFromPoint`）量：只有**贴左边且宽度 ≤480** 的元素才算占位——全宽容器要是算占位，胶囊会被推到屏幕外。
 - 右侧给窗控写死 `WINDOW_CONTROLS_GUARD = 138` px，**不是设置项**。
-- `running` 永远不出现在这里，当前会话也跳过。一个会话只出现在**一个**面上（`error`/`pending`/`completed` 走顶栏，`pinned`/`idle` 走 tab 行）。
+- `running` 永远不出现在这里，当前会话也跳过。一个会话只出现在**一个**面上（`error`/`pending`/`completed` 走顶栏，`pinned`/`idle`/`running` 走 tab 行）。
 - **胶囊只要还挂在屏幕上就一直在动。** 这是故意的：顶栏静止、旁边侧栏图标在动，看着就像坏了。在常驻循环之上，频率掷中时同一段动效会**再补播一次**；`prefers-reduced-motion`（或 `display.reduceMotion: 'on'`）两样都停。keyframes 跟着顶栏自己的样式表走，所以侧栏适配器关着时它也照动。
 - macOS：不支持，以后也不会。
 
@@ -227,11 +227,11 @@ Windows 上的 GUI 顶部有一条 40px 标题带。插件可以往里面画一�
 
 ### 自定义生效范围——哪些类别借用标题 emoji
 
-`topbar.customScope.<category>` 是六个布尔，**只在 `custom` 档生效**。关掉某一类，意味着即使会话名以 emoji 开头，那一类也继续画插件自己的图标。
+`topbar.customScope.<category>` 是六个布尔，**只在 `custom` 档生效**。关掉某一类，意味着即使会话名以 emoji 开头，那一类也继续画插件自己的图标。5.3.1 起默认**只有 `pinned` 是 `true`**——顶栏默认就是置顶那一排，如果六类都借标题 emoji，胶囊就变成用户自己打的字了。
 
 | 字段 | 取值 | 默认 |
 |---|---|---|
-| `topbar.customScope.{pinned,error,pending,completed,running,idle}` | `true` / `false` | 六类全 `true` |
+| `topbar.customScope.{pinned,error,pending,completed,running,idle}` | `true` / `false` | 只有 `pinned` |
 
 设置页里这是类别卡第二行的六颗 chip；档位是 `text` 或 `icon` 时整行不出现，因为那时候它不起作用。
 
@@ -276,7 +276,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 
 字段说明在下面两张表里；这一节按「想干什么」组织。所有项都在**设置 →「热表」**里改，改完即时生效，不用刷新。标「仅 API」的几项现在没有控件，要用 `window.__HOTLIST_SETTINGS__.set(...)`。
 
-**底线：不配也能用。** 默认值就是「tab 行 6 个座位 + 侧栏图标 + 三类会弹图 + 音效全静音」。
+**底线：不配也能用。** 默认值就是「tab 行 7 个座位 + 侧栏图标 + 三类会弹图 + 三类会响」。
 
 ### 位置：想让它出现在哪
 
@@ -290,7 +290,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 
 > **顶栏只在 Windows 桌面，macOS 永远不会有。** Windows 桌面上它画进那条 40px 标题带；在浏览器里默认不挂，要靠 `topbar.previewInWeb` 打开预览。**macOS 不支持，也不会支持**——宿主在 Mac 上顶部区域行为不一样，没有可挂载的位置。别让 Mac 用户等这个。
 >
-> 顶栏和对话区 tab 行是**并存**关系，谁都不顶替谁，它们只是分工：`error` / `pending` / `completed` 进顶栏，`pinned` / `idle` 占 tab 行，`running` **两边都不出现**（还在跑不是新闻）。两个面用的是同一份判定，同一个会话不会在两边显示成两种状态。
+> 顶栏和对话区 tab 行是**并存**关系，谁都不顶替谁，它们只是分工：`error` / `pending` / `completed` 进顶栏，`pinned` / `idle` / `running` 占 tab 行（`running` 是 5.3.1 起才进 tab 行的，之前两个座位面都不占）。两个面用的是同一份判定，同一个会话不会在两边显示成两种状态。
 
 还有第二层：`categories.<id>.surfaces.{tab,sidebar,topbar}` 决定**那一类**能不能出现在**那个面**。设置页只把这些显示成只读小标签，改要走 API。
 
@@ -298,7 +298,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 
 | 我想… | 字段 | 取值 | 默认 |
 |---|---|---|---|
-| 限制 tab 座位数 | `maxSeats` | `1`–`12`，或 `'auto'`（按实际宽度算） | `6` |
+| 限制 tab 座位数 | `maxSeats` | `1`–`12`，或 `'auto'`（按实际宽度算） | `7` |
 | 限制置顶类占几个座位 | `pinned.maxSeats` | `0`–`12`（`0` = 完全不显示置顶） | `3` |
 
 ### 时间：多久之内还算「热」
@@ -319,7 +319,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | 整类关掉 | `categories.<id>.enabled` | `true` / `false` | 六类全 `true` |
 | 决定这一类排在第几 | `categories.<id>.order` | `1`–`99` | `error 10 / pending 10 / pinned 60 / completed 20 / running 30 / idle 50` |
 | 同一类内部怎么排 | `categories.<id>.sortBy` | `'time'`（最近活动在前）/ `'manual'`（按宿主置顶次序） | `'time'`（`pinned` 为 `'manual'`） |
-| 这一类显示在哪些面 | `categories.<id>.surfaces.{tab,sidebar,topbar}` | 三个布尔 | `pinned`/`idle` 走 tab，`error`/`pending`/`completed` 走顶栏，`sidebar` 六类全开；`running` 前两个都关 |
+| 这一类显示在哪些面 | `categories.<id>.surfaces.{tab,sidebar,topbar}` | 三个布尔 | `pinned`/`idle`/`running` 走 tab，`error`/`pending`/`completed` 走顶栏，`sidebar` 六类全开 |
 | 图标从哪来 | `categories.<id>.glyph.source` | `'emoji'` / `'upload'` / `'popout'` | `'emoji'` |
 | 换图标字符 | `categories.<id>.glyph.value` | emoji，最多 8 个码位 | 见上表 |
 | 用自己画的方图 | `categories.<id>.glyph.uploads` | 最多 6 张，单张 ≤16KB，`png/jpeg/webp/gif` | `[]` |
@@ -332,7 +332,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | 待机时怎么动 | `categories.<id>.popout.ambient` | `none` / `breath` / `float` | 会弹的三类为 `breath` |
 | 怎么退场 | `categories.<id>.popout.exit` | `drop` / `particles` / `fade` / `slide-out` | `drop` |
 | 从哪一边弹 | `categories.<id>.popout.side` | `'auto'`（每次随机）/ `'left'` / `'right'`（镜像） | `'auto'` |
-| 这一类响不响 | `categories.<id>.sound.enabled` | `true` / `false` | 置顶/报错/待处理/已完成为 `true` |
+| 这一类响不响 | `categories.<id>.sound.enabled` | `true` / `false` | 报错/待处理/已完成为 `true` |
 | 内置音效还是自己的 | `categories.<id>.sound.builtin` / `.uploads` | `true` / `[]`；≤6 条、单条 ≤128KB | `true` / `[]` |
 
 `pending` 多一个副图标字段：`categories.pending.glyphSecondary`（结构与 `glyph` 相同，默认 `❓`）。
@@ -345,7 +345,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 
 ### 内置音效只有两个
 
-`assets/sounds/attention.wav` 给 `error` 与 `pending`，`assets/sounds/complete.wav` 给 `completed`。置顶、报错、待处理、已完成四类默认 `sound.enabled: true`（4.6.3 起）；进行中与闲置默认关。想换成自己的声音，见[提示音与仓库自带的 TTS 工具](#提示音与仓库自带的-tts-工具)。
+`assets/sounds/attention.wav` 给 `error` 与 `pending`，`assets/sounds/complete.wav` 给 `completed`。报错、待处理、已完成三类默认 `sound.enabled: true`（4.6.3 起；`pinned` 一直开着到 5.3.1，现在是关的——它本来就没有内置音效可放）；进行中与闲置默认关。想换成自己的声音，见[提示音与仓库自带的 TTS 工具](#提示音与仓库自带的-tts-工具)。
 
 ### 只在耳机时响——严格音频门禁
 
@@ -363,9 +363,44 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 - 探测是走 Windows Core Audio API 的一次性 PowerShell 调用（`tools/audio-endpoint/audio-endpoint.ps1`，随包发布）。宿主最多每 60 秒跑一次并缓存结果（`GET /hotlist-audio`，需要 `x-hotlist-audio: 1` 请求头），所以播放永远不会等子进程。
 - **仅 Windows。** macOS 和没有 host 半边的浏览器里没有探测，因此这道门开着就等于不响。那边要么关掉它，要么一开始就别开。
 - 门禁只管**自动**播放。设置页里每类旁边那个 ▶（`assets.preview(category)`）是你自己按的，**永远会响**——否则你在扬声器上就没法试音效好不好。
-- `window.__HOTLIST__.audio()` 回答这个只读问题：`{ smart, state, kindGuess, name, error, asOf, pass }`。开着开关而 `pass: false`，意思就是「这台机器现在会保持沉默，原因在这里」。
+- `window.__HOTLIST__.audio()` 回答这个只读问题：`{ smart, state, kindGuess, name, error, asOf, pass, config }`。开着开关而 `pass: false`，意思就是「这台机器现在会保持沉默，原因在这里」；`config` 是设备清单自己的摘要（见下节）。
 
-开着开关却听不到声音，先跑一次 `__HOTLIST__.audio()`：`state: "measured"` + `kindGuess: "speakers"` 说明门禁在按设计工作；`error: "script-missing"` 说明装的是残包。
+开着开关却听不到声音，先跑一次 `__HOTLIST__.audio()`：`state: "measured"` + `kindGuess: "speakers"` 说明门禁在按设计工作；`error: "script-missing"` 说明装的是残包；`config.status` 说清单是不是在起作用。
+
+### 设备清单——给门禁做一次性配置
+
+上面那道门靠**设备类型**判断：探测说「耳机」就响。那是 Windows 给的猜测，而 Windows 经常猜错——蓝牙耳机可能报成 `speakers`，有些驱动什么都不报。设备清单用**你自己列的名字**替掉这个猜测：
+
+> **设置 →「超级提醒」→ 设备清单那一行 → `{配置}`** 会把一段提示词复制到剪贴板，粘给你的 AI（任何能在这台机器上跑 PowerShell 的智能体都行）。它枚举音频设备、分组、标出耳机，把结果写进一个配置文件。插件只读那个文件。
+
+不用配也能用。没有清单时，门禁照旧按类型判断——**配置是叠加，不是前置条件**。
+
+**那一行右侧的短状态**：
+
+| 状态 | 含义 |
+|---|---|
+| 未初始化 · 按系统类型判断 | 没有配置文件：上面那套按类型判的门禁在起作用 |
+| 已配置 N 个（耳机 M 个） | 文件读到了，里面有耳机 |
+| 已配置，但没标出耳机 | 文件能解析，但没有任何一条被分成耳机——退回按类型判断 |
+| 文件格式不对 | 文件在但解析不了（JSON 坏了、`version` 不对、`devices` 不是数组）——退回按类型判断 |
+
+另有两种环境态：**仅 Windows 可用**（别的平台没有探测）和**读不到状态**（宿主半边连不上——此时什么都不记，因为一条过期的「已配置 N 个」比没有更糟）。
+
+**有了清单之后判定怎么变**——还是同一个函数，只是在最前面多一步：
+
+1. `audio.smart` 关着 → 响。别的什么都不问（不变）。
+2. 探测缺失、超过 60 秒、没测出结果、报错 → **不响**（`audio-unknown`，不变）。
+3. **清单里有耳机** → 当前默认输出必须按名字命中其中一台耳机。命中 → 响；不命中 → **不响**（`not-headphones`）。这是**白名单**语义：清单里没有你现在这台设备，就是静音，不是「退回猜」。
+4. 没有清单、清单读不了、清单里没有耳机 → 走旧的那套按类型判（`kindGuess === 'headphones'`）。
+
+**名字匹配按这个顺序**——先精确，再归一化后相等，最后才包含：
+
+- 归一化 = 去掉所有成对括号里的型号（`(...)` 与 `（...）`）、连续空白压成一个空格、`trim`、小写；
+- 包含**只在两边都至少 6 个字符时才算**。Windows 上真有设备友好名就叫「耳机」/ `Speakers`；没有下限，这一条就会匹配上机器里的每一台设备——包括别人的。
+
+**文件位置**：`<DSH_HOME>\hotlist-audio.json`（设置了 `DSH_HOME` 用它，否则 `%USERPROFILE%\.dsh`）。`<DSH_HOME>` 是宿主自己解析出来的根；页面永远不拼这个路径——宿主把它**实际会读的绝对路径**返回来，提示词里带的也是那个路径（外加枚举脚本的绝对路径），所以「你 AI 写的文件」和「宿主读的文件」在构造上就是同一个。点**文件位置**能直接看到它；那一行还有**重新读取**——而且清单**每 60 秒自动重读一次**，所以你可以复制提示词、去跟 AI 聊、回来时这一行已经自己变了。
+
+`window.__HOTLIST__.audio()` 暴露同一套状态机，外加一个 `config` 摘要——见 [JavaScript API](#javascript-api)。
 
 ### 判定优先级是固定的
 
@@ -382,14 +417,14 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 - **折叠卡**：图标预览、类别名、`· 顺序 N`、五个只读小标签（Tab / 栏 / 顶 / 弹 / 音，高亮 = 开）、右端 caret。点整行展开，**可以同时开多张卡**。展开状态存 `sessionStorage`（`dsh.hotlist.open`），不写进设置。
 - **展开区**（紧凑多列）：① 图标（来源 / 上传 / 图标值 / 频率滑块）；② 动效（`motion` + 作用于 `glyph`/`row`）；③ 弹出（开关 / 弹出图 / 入场·待机·退出 / 出现侧·停留时长）；④ 音效（启用 / 来源 / 试听）；⑤ 顺序。
 - **全局区**：范围（当前工作区 / 全部 / 智能）、座位上限、**置顶最多显示**、刚完成保持时长（分钟）、全局音量、**最近窗口**（分钟）、`positions.tab`、`positions.topbar`、`positions.sidebar`（仅 API）、`takeOverStatusDot`。顶栏那一段（样式 / 标签显示 / 胶囊数 / 胶囊宽度 / 网页预览）只在 `positions.topbar` 打开时才存在。
-- **超级提醒组**，紧跟在全局区下面：`ring.pending`、`ring.error`、`ring.completed`，三个都是关；再加一道**「只在耳机时响」**门禁（`audio.smart`，同样是关）。详见[超级提醒](#超级提醒)与[只在耳机时响](#只在耳机时响严格音频门禁)。
+- **超级提醒组**，紧跟在全局区下面：`ring.pending`、`ring.error`、`ring.completed`，三个都是关；再加一道**「只在耳机时响」**门禁（`audio.smart`，同样是关），以及它下面的**设备清单**行（状态 + `{配置}` / 重新读取 / 文件位置）。详见[超级提醒](#超级提醒)、[只在耳机时响](#只在耳机时响严格音频门禁)与[设备清单](#设备清单给门禁做一次性配置)。
 - 越界写入会被夹回范围。写盘失败（localStorage 配额满）会在页脚提示，也能从 `window.__HOTLIST_SETTINGS__.lastError()` 拿到原因。
 
 ### 全局默认值
 
 | 设置 | 默认值 | 范围 / 说明 |
 |---|---|---|
-| `maxSeats` | `6` | `1`–`12`，或 `'auto'`（按 tab 行实际宽度） |
+| `maxSeats` | `7` | `1`–`12`，或 `'auto'`（按 tab 行实际宽度） |
 | `positions.tab` | `true` | tab 座位总开关 |
 | `positions.sidebar` | `true` | 侧栏总开关（设置页无此行，走 API） |
 | `positions.topbar` | `true` | Windows 桌面标题带；浏览器里要 `topbar.previewInWeb` 才挂 |
@@ -400,11 +435,11 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | `topbar.chipWidthPct` | `0` | **百分比**，`-30`…`+30`；`0` 与出厂宽度逐字节一致 |
 | `topbar.previewInWeb` | `false` | 浏览器里也画顶栏 |
 | `topbar.rightReservePx` | `0` | `0`–`400` px（无设置行，仅 API） |
-| `topbar.customScope` | 六类全 `true` | 六个布尔，只在 `custom` 档读 |
+| `topbar.customScope` | 只有 `pinned` | 六个布尔，只在 `custom` 档读 |
 | `choices` | `{}` | 用户真选过的键；由 `writeSettings()` 写，不要手改 |
 | `takeOverStatusDot` | `true` | 顶掉其它插件（`dsh-sessions-manager`）画的行首状态点 |
 | `ring.pending` / `ring.error` / `ring.completed` | 全 `false` | 该状态出现时在最上层提醒一次；仅 Windows、仅主屏——见[超级提醒](#超级提醒) |
-| `audio.smart` | `false` | **严格的耳机门禁**：只有探测确认默认输出是耳机时才响；探不出来（失败 / 没有 `pwsh` / 非 Windows）也**不响**——见[只在耳机时响](#只在耳机时响严格音频门禁) |
+| `audio.smart` | `false` | **严格的耳机门禁**：只有探测确认默认输出是耳机时才响（或配过设备清单后，当前输出按名字命中清单里的耳机）；探不出来（失败 / 没有 `pwsh` / 非 Windows / 清单没命中）也**不响**——见[只在耳机时响](#只在耳机时响严格音频门禁)与[设备清单](#设备清单给门禁做一次性配置) |
 | `hideNativeDot` | `true` | 隐藏宿主原生状态槽（4.4 起无设置行，字段保留） |
 | `collect.completedTtlMs` | `420000`（7 分钟） | 1–1440 分钟 |
 | `collect.recentWindowMinutes` | `17` | **分钟**。设置页 `1`–`120`；走 API `0`–`120`（`0` = 不显示 `idle`） |
@@ -422,7 +457,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | `enabled` | 六类全 `true` | 关掉即不判定、不出座位、侧栏不出图标 |
 | `order` | `10`…`50` | 1–99，只决定展示顺序；`error` 与 `pending` 同为 `10`，同分按判定优先级兜底 |
 | `sortBy` | `'time'`（`pinned` 为 `'manual'`） | `time` = 最近活动在前；`manual` = 宿主置顶次序 |
-| `surfaces.tab` / `.sidebar` / `.topbar` | `true` / `true` / `false` | 设置页只读小标签 |
+| `surfaces.tab` / `.sidebar` / `.topbar` | `pinned`+`idle`+`running`：`true` / `true` / `false` · `error`+`pending`+`completed`：`false` / `true` / `true` | 设置页只读小标签 |
 | `glyph.source` | `'emoji'` | `emoji` / `upload` / `popout`（拿该类弹出图当图标） |
 | `glyph.value` | 见上表 | emoji，最多 8 个码位 |
 | `glyph.uploads` | `[]` | 最多 6 张，单张 ≤16KB，`png/jpeg/webp/gif`（**拒 svg**） |
@@ -434,7 +469,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | `popout.displayMs` | `7000` | 2000–20000，500ms 取整 |
 | `popout.entrance` | `'slide'` | **只读**，固定 clip 揭示 |
 | `popout.ambient` / `.exit` / `.side` | `breath` / `drop` / `'auto'` | 待机动效 / 退场 / 出现侧 |
-| `sound.enabled` | 置顶/报错/待处理/已完成为 `true`，其余 `false` | 该类别音效开关 |
+| `sound.enabled` | 报错/待处理/已完成为 `true`，其余 `false` | 该类别音效开关 |
 | `sound.builtin` | `true` | `true` = 内置 wav：`pending`/`error` → `attention.wav`，`completed` → `complete.wav` |
 | `sound.uploads` | `[]` | 最多 6 条，单条 ≤128KB |
 
@@ -444,14 +479,14 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 
 | 用户说 | 其实是 | 改哪里 | 大概什么值 |
 |---|---|---|---|
-| 「太吵了」 | 多半是动效或弹出图——四类提示音默认是开的 | 音效 `sound.enabled` / `sound.volume`；动效 `glyph.frequency`；弹出 `popout.enabled` | `sound.volume: 20`–`30`；`frequency: 0.1`–`0.3`；或把三类的 `popout.enabled` 关掉 |
+| 「太吵了」 | 多半是动效或弹出图——三类提示音默认是开的 | 音效 `sound.enabled` / `sound.volume`；动效 `glyph.frequency`；弹出 `popout.enabled` | `sound.volume: 20`–`30`；`frequency: 0.1`–`0.3`；或把三类的 `popout.enabled` 关掉 |
 | 「一闪一闪很烦」 | 动效，不是音效 | `glyph.frequency` 调低或 `0`；全局 `display.reduceMotion = 'on'` | `frequency: 0` 之后该类完全不动 |
 | 「太乱了」 | 先减数量，再减面 | `maxSeats`；再 `positions.sidebar = false` | `maxSeats: 3`–`4` |
 | 「只提醒我需要动手的」 | 只留 `error` + `pending` | 把 `completed`/`running`/`idle` 的 `surfaces` 全关 | `{tab:false,sidebar:false,topbar:false}` |
 | 「想更显眼」 | 加弹出、加声音、加动效 | `popout.enabled`、`sound.enabled`、`frequency` 调高 | `popout.displayMs: 12000`，`frequency: 1`，`overlay.sizeMin/sizeMax` 调高 |
 | 「看不到某一类」 | 三个开关按序排查 | ① `categories.<id>.enabled` ② 它的 `surfaces` ③ `idle` 的最近窗口 | ① 必须 `true` ② 那个面的那一位必须 `true` ③ `recentWindowMinutes > 0` |
 | 「只在戴耳机的时候响」 | 严格音频门禁，不是音量问题 | `audio.smart = true` | 只在用户明确要求时开；同时说明「探不出来就不响」，以及 `__HOTLIST__.audio()` 能解释为什么没响 |
-| 「开了只在耳机时响，现在完全不响了」 | 门禁在设计内拒绝 | 先读 `__HOTLIST__.audio()`，别急着改 | `kindGuess: 'speakers'` / `state: 'unknown'` = 正按设计工作；**不要**靠放宽门禁去「修」它 |
+| 「开了只在耳机时响，现在完全不响了」 | 门禁在设计内拒绝 | 先读 `__HOTLIST__.audio()`，别急着改 | `kindGuess: 'speakers'` / `state: 'unknown'` = 正按设计工作；`config.status` 说明设备清单那边看到了什么；**不要**靠放宽门禁去「修」它 |
 | 「改了没生效」 | 分情况 | 改 `client.js` → 刷新页面；改 `index.js` → **重启 GUI**；只改设置值 → 看 `lastError()`，多半被夹回默认 | — |
 | 「顶栏什么时候有」 | 只有 Windows 桌面（macOS 永远没有） | `positions.topbar`，浏览器预览加 `topbar.previewInWeb` | Windows 默认 `true`；浏览器里要开预览开关 |
 | 「怎么置顶／取消置顶」 | 不在本插件 | 宿主侧栏行自带菜单 | 我们只读；`pinned.maxSeats` 只控制显示几个 |
@@ -479,7 +514,7 @@ window.__HOTLIST_SETTINGS__.set(next);
 
 ## 提示音与仓库自带的 TTS 工具
 
-**先说结论：不装任何东西也能响。** 插件自带两个音效——`attention.wav` 给报错和待处理、`complete.wav` 给完成。置顶、报错、待处理、已完成这四类 `sound.enabled` **默认就是开的**（4.6.3 起）；但注意**置顶没有内置音效**，开关虽开也响不了，要响得自己传一条。进行中与闲置默认静音。**提示音还能只让耳机响**——见[只在耳机时响](#只在耳机时响严格音频门禁)：一个开关，默认关。下面这套只在你想**加新的台词、或者换音色**时才需要。
+**先说结论：不装任何东西也能响。** 插件自带两个音效——`attention.wav` 给报错和待处理、`complete.wav` 给完成。报错、待处理、已完成这三类 `sound.enabled` **默认就是开的**（4.6.3 起；`pinned` 到 5.3.1 已关，它没有内置音效可放）。进行中与闲置默认静音。**提示音还能只让耳机响**——见[只在耳机时响](#只在耳机时响严格音频门禁)：一个开关，默认关。下面这套只在你想**加新的台词、或者换音色**时才需要。
 
 ### 1. 本地没有语音生成能力，就用仓库里这个
 
@@ -530,7 +565,7 @@ AI 接手时按这个顺序做：
 2. 先 `--list-voices` 确认音色存在，再生成。
 3. 检查大小：必须 ≤128KB 才能进音效池；超了就缩短台词或降码率重生成。
 4. 装进去：让用户在设置页上传，或给用户一段 `window.__HOTLIST__.assets.add('<类别>', 'sound', { name, dataUrl })`（`<类别>` 是 `error` / `pending` / `completed`）。
-5. 提醒用户：置顶/报错/待处理/已完成四类 `sound.enabled` 默认是 `true`，进行中与闲置默认关。
+5. 提醒用户：报错/待处理/已完成三类 `sound.enabled` 默认是 `true`，其余默认关。
 
 细节见 [`tools/meru-tts/README.md`](tools/meru-tts/README.md)。
 
@@ -573,7 +608,7 @@ s.lastError()      // 最近一次写盘错误（字符串或 null）
 
 // 设置 + 三个素材池
 const api = window.__HOTLIST__;
-api.version                                        // '5.3.0'
+api.version                                        // '5.3.1'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }
@@ -584,7 +619,7 @@ api.assets.preview('pending')                      // 立刻试听 → boolean
 
 // 只读探针，给脚本与验收脚本用
 api.topbar()                                       // → { mounted, mode, titleMode, left, leftSource, measured, reserve, currentId, capacity, chips }
-api.audio()                                        // → { smart, state, kindGuess, name, error, asOf, pass }；播放器还没挂时为 null
+api.audio()                                        // → { smart, state, kindGuess, name, error, asOf, pass, config }；播放器还没挂时为 null
 api.export({ format: 'md' })                       // 导出会话清单，md | txt | json（裸调用也能用）
 ```
 
@@ -592,7 +627,7 @@ api.export({ format: 'md' })                       // 导出会话清单，md | 
 - `category`：`'pinned' | 'error' | 'pending' | 'completed' | 'running' | 'idle'`。
 - `add` 的 `reason` 是 `invalid` / `full` / `refused` / `budget` 之一。
 - `export()`：`format` 是 `md` | `txt` | `json`（**不是** `markdown`）；显式 `ids` 优先于 `scope`；`md`/`txt` 带 BOM，`json` 不带；纯函数，同一快照导两次逐字节相同。
-- `audio()` 也不写任何东西。`pass` 是门禁**此刻**会给出的答案：开关关着时永远是 `true`；开着时要等探测测到耳机才变 `true`。`null` 表示音效播放器还没挂上。
+- `audio()` 也不写任何东西。`pass` 是门禁**此刻**会给出的答案：开关关着时永远是 `true`；开着时要等探测测到耳机才变 `true`。`null` 表示音效播放器还没挂上。它的 `config` 字段是设备清单自己的摘要——`{ status, exists, valid, path, script, platform, deviceCount, headphoneCount, guessCount, updatedAt }`，`status` 是 `missing` / `ready` / `empty` / `invalid` / `unsupported` / `hostDown` 之一。配置了清单却不生效时，先读它再猜。
 - `topbar()` 只读。`leftSource` 告诉你 band 的左边界来自 `occupied`（命中测试）、`menu` 还是 `fallback`——验收脚本读的就是这个字段。
 
 **两个坑**：
@@ -617,13 +652,14 @@ api.export({ format: 'md' })                       // 导出会话清单，md | 
 11. **音效有 1.5 秒全局节流。** 两次播放间隔不足 1500ms 时后来的那条直接丢弃；冷启动首轮只记不播。这条只有源码与单测口径（组 `sound player dedupe`）——真机上很难构造连续两次真实状态转换。
 12. **设置与页面端口绑定。** `localStorage` 挂在 origin 上，GUI 端口变了就是另一个 origin。
 13. **超级提醒只在 Windows 上能用，而且只盖主屏。** 脚本是 PowerShell + WPF，页面只能*请求*宿主去跑它：别的平台上开关会存下你的选择，但什么都不会升起来。它也只在主显示器上出现，副屏不会闪。
-14. **耳机门禁故意严格，而且只在 Windows 上有效。** 开着 `audio.smart` 时，只有探测**测到**默认输出是耳机才响。探测失败、超时、没有 `pwsh`、非 Windows——全都是**不响**，而不是「大概没事」。跑一次 `__HOTLIST__.audio()` 就知道自己碰到的是哪一种。
+14. **耳机门禁故意严格，而且只在 Windows 上有效。** 开着 `audio.smart` 时，只有探测**测到**默认输出是耳机才响——或者（5.3.1 起，配过设备清单之后）当前输出设备按名字命中清单里的某台耳机。探测失败、超时、没有 `pwsh`、非 Windows、清单里没有命中——全都是**不响**，而不是「大概没事」。跑一次 `__HOTLIST__.audio()` 就知道自己碰到的是哪一种：`pass` 是判定，`config.status` 是清单自己的状态。
+15. **设备清单是按机器走的，插件不写它。** 它放在 `<DSH_HOME>\hotlist-audio.json`、在 `localStorage` 之外，所以设置导出/备份不会带它，也不会在多台机器间同步——每台机器都要自己点一次 `{配置}` 跑提示词。它也不是安全边界：它只是把「哪些设备算耳机」换了个名字，底下那层探测该成功还得成功。
 
 ## 改这个插件
 
 给「拿到仓库就要动手改」的人或 AI。目标：读完这一节能定位改哪、改完能自己验证，不用回来问。
 
-> **行号怎么用**：下面的 `client.js:NNN` 是 5.3.0 发布时的位置，只作**起点**。文件一改行号就漂，所以先按**符号名**搜（`grep -n 'function classify' client.js`），行号对不上是正常的，符号名才是准的。`test/classify.test.mjs` 同理：组名比行号稳。
+> **行号怎么用**：下面的 `client.js:NNN` 是 5.3.1 发布时的位置，只作**起点**。文件一改行号就漂，所以先按**符号名**搜（`grep -n 'function classify' client.js`），行号对不上是正常的，符号名才是准的。`test/classify.test.mjs` 同理：组名比行号稳。
 
 ### 一句话架构
 
@@ -646,24 +682,24 @@ ctx.get('uiWorkspace').workspaces.list             ← 工作区分组 + pinnedS
 ctx.remote.$on('api-session/error', …)             ← agent 级报错
                  │
                  ▼
-        classify()      判类别与 token            client.js:2103
-        sortSeats()     同类别内排序               client.js:2169
-        buildSeatPlan() 套上限、给出座位 order      client.js:2192
+        classify()      判类别与 token            client.js:2646
+        sortSeats()     同类别内排序               client.js:2712
+        buildSeatPlan() 套上限、给出座位 order      client.js:2735
                  │
      ┌───────────┴────────────┬──────────────────┐
      ▼                        ▼                  ▼
 mountTabSeats()        createSidebarAdapter()  HotlistSettingsPage()
 tab 座位（conversation.view）  侧栏 DOM 增强      设置页（settings.section）
-client.js:5667                client.js:3014    client.js:3762
+client.js:6391                client.js:3557    client.js:4308
 ```
 
-三个纯函数（`classify` / `sortSeats` / `buildSeatPlan`）不碰 DOM、可以喂假数据，是**改行为最安全的入口**。它们的返回值也是 `window.__HOTLIST__` 之外唯一的调试抓手——`client.js` 末尾的导出表（`client.js:7058` 起）把 `classify` / `sortSeats` / `buildSeatPlan` / `readSettings` / `defaultSettings` / `sanitizeSettings` / `sidebarStateOf` / `HotlistSettingsPage` 都交了出来，单测就是靠这张表跑真源码的。
+三个纯函数（`classify` / `sortSeats` / `buildSeatPlan`）不碰 DOM、可以喂假数据，是**改行为最安全的入口**。它们的返回值也是 `window.__HOTLIST__` 之外唯一的调试抓手——`client.js` 末尾的导出表（`client.js:7791` 起）把 `classify` / `sortSeats` / `buildSeatPlan` / `readSettings` / `defaultSettings` / `sanitizeSettings` / `sidebarStateOf` / `HotlistSettingsPage` 都交了出来，单测就是靠这张表跑真源码的。
 
 ### 改一处要碰哪几处
 
 **1）加一个类别**
 
-`CATEGORY_IDS`（`client.js:184`）→ `CATEGORY_ORDER`（`client.js:185`）→ `CATEGORY_GLYPHS`（`client.js:204`）→ `CATEGORY_MOTION`（`client.js:205`）→ `CATEGORY_SURFACES`（`client.js:263`，值是 `{tab, sidebar, topbar}`）→ `defaultCategory()`（`:359`）补默认值 → `sanitizeSettings()`（`:1192`）里认这个键 → `classify()`（`:2082`）里给它一条判定 → 词典 `ZH`（`:497`）/ `EN`（`:696`）各加一组文案 → `test/classify.test.mjs` 加一组。漏掉 `CATEGORY_GLYPHS` 通常只是图标空白；漏掉 `CATEGORY_SURFACES` 会直接在 `defaultCategory()` 里抛。
+`CATEGORY_IDS`（`client.js:184`）→ `CATEGORY_ORDER`（`client.js:185`）→ `CATEGORY_GLYPHS`（`client.js:204`）→ `CATEGORY_MOTION`（`client.js:205`）→ `CATEGORY_SURFACES`（`client.js:278`，值是 `{tab, sidebar, topbar}`）→ `defaultCategory()`（`:359`）补默认值 → `sanitizeSettings()`（`:1192`）里认这个键 → `classify()`（`:2082`）里给它一条判定 → 词典 `ZH`（`:497`）/ `EN`（`:696`）各加一组文案 → `test/classify.test.mjs` 加一组。漏掉 `CATEGORY_GLYPHS` 通常只是图标空白；漏掉 `CATEGORY_SURFACES` 会直接在 `defaultCategory()` 里抛。
 
 **2）加一条设置项**
 
@@ -671,7 +707,7 @@ client.js:5667                client.js:3014    client.js:3762
 
 **3）加一个动效**
 
-`MOTION_NAMES`（`client.js:272`）加名字 → `MOTION_MS`（`client.js:2746`）加时长 → `SIDEBAR_STYLE`（`client.js:2768`）里加 `@keyframes hl-<名字>`（只动 `transform` / `opacity`）→ 要做文字版就在 `TEXT_MOTION`（`client.js:2755`）与 `TEXT_BURST`（`client.js:2762`）各加一条 + `@keyframes hl-text-<名字>`。同屏并发上限是 `MOTION_CONCURRENCY`（`client.js:310`）。
+`MOTION_NAMES`（`client.js:287`）加名字 → `MOTION_MS`（`client.js:3289`）加时长 → `SIDEBAR_STYLE`（`client.js:3311`）里加 `@keyframes hl-<名字>`（只动 `transform` / `opacity`）→ 要做文字版就在 `TEXT_MOTION`（`client.js:3298`）与 `TEXT_BURST`（`client.js:3305`）各加一条 + `@keyframes hl-text-<名字>`。同屏并发上限是 `MOTION_CONCURRENCY`（`client.js:325`）。
 
 **4）加一个弹出图点位**
 
@@ -679,7 +715,7 @@ client.js:5667                client.js:3014    client.js:3762
 
 **5）换内置音效**
 
-`BUILTIN_SOUND`（`client.js:330`）是类别到文件名的唯一一张表（`SOUND_CATEGORIES`（`client.js:332`）由它派生）；把新 wav 放进 `assets/sounds/`、改这张表、同步 `assets/sounds/manifest.json`。播放地址由 `SOUND_URL`（`client.js:329`）拼出 `/hotlist-sound/<文件>`，实际发文件的是 `index.js` 的 `serveSound()`；改完**必须重启 GUI**。
+`BUILTIN_SOUND`（`client.js:345`）是类别到文件名的唯一一张表（`SOUND_CATEGORIES`（`client.js:347`）由它派生）；把新 wav 放进 `assets/sounds/`、改这张表、同步 `assets/sounds/manifest.json`。播放地址由 `SOUND_URL`（`client.js:344`）拼出 `/hotlist-sound/<文件>`，实际发文件的是 `index.js` 的 `serveSound()`；改完**必须重启 GUI**。
 
 **6）改顺序与优先级**
 
@@ -693,10 +729,10 @@ client.js:5667                client.js:3014    client.js:3762
 
 - 字段：`settings.categories.<类别>.glyph.motionTarget`
 - 取值：`'glyph'` = 只动图标；`'row'` = 图标 + 标题一起动。
-- **4.6.0 起默认统一成 `'row'`**（`defaultGlyph()`，`client.js:355`）。
+- **4.6.0 起默认统一成 `'row'`**（`defaultGlyph()`，`client.js:834`）。
 
 ```js
-// 改法一：改所有类别的默认值（源码，defaultGlyph() client.js:355）
+// 改法一：改所有类别的默认值（源码，defaultGlyph() client.js:834）
 function defaultGlyph(category) {
   return {
     kind: 'emoji',
@@ -711,7 +747,7 @@ function defaultGlyph(category) {
 ```
 
 ```js
-// 改法二：逐类决定（源码，defaultCategory() client.js:368 里覆盖）
+// 改法二：逐类决定（源码，defaultCategory() client.js:847 里覆盖）
 // 例如只让「待处理」连标题一起动：
 glyph: { ...defaultGlyph(category), motionTarget: category === 'pending' ? 'row' : 'glyph' },
 ```
@@ -725,16 +761,16 @@ window.__HOTLIST_SETTINGS__.set({
 
 **改法三有个坑**：`set` 只做两级浅合并，`glyph` / `popout` / `sound` 是**整块替换**，上面那行会把 `pending.glyph` 的 `value`、`motion`、`frequency` 全洗回默认。正确姿势是先 `get()`、改整个对象、再 `set()`。
 
-加一条新的文字动效：`TEXT_MOTION`（`client.js:2755`，常驻循环）与 `TEXT_BURST`（`client.js:2762`，单次爆发）各加一条，`MOTION_MS`（`client.js:2746`）加时长，`SIDEBAR_STYLE`（`client.js:2768`）里加 `@keyframes hl-text-<名字>`。文字 keyframes **只动 `opacity` 与 1–2px 位移，不加 `scale`**（会发虚）；并发仍受 `MOTION_CONCURRENCY`（`client.js:310`）约束，频率是每类独立的 `glyph.frequency`。
+加一条新的文字动效：`TEXT_MOTION`（`client.js:3298`，常驻循环）与 `TEXT_BURST`（`client.js:3305`，单次爆发）各加一条，`MOTION_MS`（`client.js:3289`）加时长，`SIDEBAR_STYLE`（`client.js:3311`）里加 `@keyframes hl-text-<名字>`。文字 keyframes **只动 `opacity` 与 1–2px 位移，不加 `scale`**（会发虚）；并发仍受 `MOTION_CONCURRENCY`（`client.js:325`）约束，频率是每类独立的 `glyph.frequency`。
 
 ### 升级不破坏用户设置
 
-**承诺：升级插件永远不改掉用户已经选过的设置。** 仍然等于我们某一代出厂默认的值不算「选过」——它跟随当前默认（见下面那条 `LEGACY_VALUES`）；除此之外盘上的值一律优先。用户**真选过**的字段是他自己的，哪怕值恰好等于某个预设：`choices`（`client.js:1988`）记下这些选择，预设规则动它之前先看这张表。
+**承诺：升级插件永远不改掉用户已经选过的设置。** 仍然等于我们某一代出厂默认的值不算「选过」——它跟随当前默认（见下面那条 `LEGACY_VALUES`）；除此之外盘上的值一律优先。用户**真选过**的字段是他自己的，哪怕值恰好等于某个预设：`choices`（`client.js:2531`）记下这些选择，预设规则动它之前先看这张表。
 
 怎么做到：
 
 - **默认值只用来补缺**，盘上已有的值永远优先。`sanitizeSettings()` 的写法是「先拿 default，再逐字段看盘上有没有合法值，有就用盘上的」——所以改 `CATEGORY_ORDER`、改 `defaultGlyph()` 对老用户是**完全无感**的。
-- **出厂预设是我们的，不是用户的**：盘上某个值只等于我们过去某一代发的默认值（闲置图标 `💤`、动效 `blink` / `none`、`motionTarget: 'glyph'`、频率 `1`、音效关），就跟随当前默认——这样老安装不用用户重新设置也能看到冰块图标和 4.6.3 那套动效表。这张表是 `LEGACY_VALUES`（`client.js:214`），和类别 `order` 等于历史默认值时的判据（`LEGACY_DEFAULTS`）是同一条分界线。用户一旦动过那个字段，值就是用户的，我们再也不碰；不是任何一代默认值的值一字不动。「动过」是显式记下来的：`choices` `{ "<路径>": true }`（`client.js:1024-1065`），只由 `writeSettings()` 用**传进来的 patch** 写，所以被预设规则改写过、用户没选过的值混不进来；`resetSettings()` 会把整张表清空，因为恢复默认等于重新认可出厂预设。
+- **出厂预设是我们的，不是用户的**：盘上某个值只等于我们过去某一代发的默认值（闲置图标 `💤`、动效 `blink` / `none`、`motionTarget: 'glyph'`、频率 `1`、音效关），就跟随当前默认——这样老安装不用用户重新设置也能看到冰块图标和 4.6.3 那套动效表。这张表是 `LEGACY_VALUES`（`client.js:214`），和类别 `order` 等于历史默认值时的判据（`LEGACY_DEFAULTS`）是同一条分界线。用户一旦动过那个字段，值就是用户的，我们再也不碰；不是任何一代默认值的值一字不动。「动过」是显式记下来的：`choices` `{ "<路径>": true }`（`client.js:1537-1578`），只由 `writeSettings()` 用**传进来的 patch** 写，所以被预设规则改写过、用户没选过的值混不进来；`resetSettings()` 会把整张表清空，因为恢复默认等于重新认可出厂预设。
 - **加字段**：在 `sanitize*` 里给个 fallback 就够了，**不要升 `SETTINGS_VERSION`**。升号意味着「必须有迁移」，而迁移写错会静默洗掉用户数据。
 - **真要改数据结构**（删字段、换含义）：必须保留「读旧值 → 转换 → 丢弃旧字段」这条链（现住在 `sanitizeSettings()` 里，v3.1 → v4 就是这么过的），并把 `SETTINGS_VERSION` 升最小的号。`migrate v3 to v4` 一组就是这条链的验收。
 
@@ -761,7 +797,7 @@ window.__HOTLIST_SETTINGS__.set({
 ```powershell
 node --check client.js          # 语法。client.js 包在模块加载器里，语法错只在真机 boot 时炸
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 115 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 121 groups
 ```
 
 外加一道**保存前的静态闸门**（只在维护者机器上有，不随仓库分发）：
@@ -777,7 +813,7 @@ cd <你 clone 下来的那个目录>
 
 node --check client.js          # client.js 包在模块加载器里，语法错只在真机 boot 时炸
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 115 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 121 groups
 ```
 
 单测把真实的 `client.js` 源文件读进来，塞进 `window.__ModuleLoader__` 的桩里执行：假的是浏览器（手写的极简 `window` / `document`，不引 jsdom，`React` 也是桩），跑的是真源码。里面还带几道静态扫描：引用未声明的常量、注入样式选择器合法性、快捷键 label 必须是 thunk。
@@ -792,7 +828,7 @@ index.js               宿主侧：注册 /hotlist-sound、/hotlist-ring、/hotl
 cordis.patch.yml       bundle 插入行
 assets/                3 类各 4 档弹出图素材 + 六类各一份 svg
 assets/sounds/         内置音效（attention.wav / complete.wav）
-test/classify.test.mjs 单测（115 组）
+test/classify.test.mjs 单测（121 组）
 docs/                  架构、测试、扩展三份维护者文档
 tools/attn-ring/       超级提醒脚本（PowerShell + WPF；随包发布）
 tools/audio-endpoint/  默认输出探测（Windows Core Audio，走 PowerShell；随包发布）
@@ -803,7 +839,7 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 
 十一条已经真实踩过、并且让你多花调试时间的问题（其中一条还搞坏过一个版本）。每条都写清「不这么做会怎样」。
 
-1. **传给宿主的回调必须是 thunk，不能是值。** 宿主自己在 `refreshLabels()` 里直接调 `command.label()`（`dsh-client-shortcuts/lib/client.js:1190`）；传字符串就是 `TypeError: command.label is not a function`，它会把 `uiWorkspace` 一起带走——**整个 Web UI 起不来，只剩一条 `Failed to load plugins`，二十来个插件条目挂在 pending**。v4.3.0 就是这么坏掉的。设置页那条 `label: () => t('settings.nav')`（`client.js:5315`）同理，别改成直接传值。单测抓不到，因为 `shortcuts` 是桩、桩从不调 `label()`——**宿主会调的入参回调，桩里必须真的调一次。**
+1. **传给宿主的回调必须是 thunk，不能是值。** 宿主自己在 `refreshLabels()` 里直接调 `command.label()`（`dsh-client-shortcuts/lib/client.js:1190`）；传字符串就是 `TypeError: command.label is not a function`，它会把 `uiWorkspace` 一起带走——**整个 Web UI 起不来，只剩一条 `Failed to load plugins`，二十来个插件条目挂在 pending**。v4.3.0 就是这么坏掉的。设置页那条 `label: () => t('settings.nav')`（`client.js:6039`）同理，别改成直接传值。单测抓不到，因为 `shortcuts` 是桩、桩从不调 `label()`——**宿主会调的入参回调，桩里必须真的调一次。**
    *不这么做会怎样：* 不是插件不生效，是整个页面都加载不出来。
 
 2. **包名、模块 id、bundle 条目必须是同一个字符串。** `package.json` 的 `name` = `window.__ModuleLoader__.load({ id })` 里的 `id` = profile 里 `dsh.profile.bundles` 记的那一项。
@@ -815,7 +851,7 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 4. **我们注册的静态路由不鉴权。** `/hotlist-sound/*` 与 `/plugins/**/assets/*` 不校验 token，能连到端口的人都能取。
    *不这么做会怎样：* 你等于开了一条泄露路径。只放公开素材，永远别放用户数据。
 
-5. **用户设置永远不许覆盖。** `sanitizeSettings()`（`client.js:1209`）是纯函数、**逐字段回落而不是整块回落**；未知键被收进 `PRESERVED_KEY`（`client.js:169`）下次读回；超范围原值记在 `outOfRangeOf`（`client.js:1713`）也会还回去；最近五次写入滚动存在备份环（`BACKUP_KEY`，`client.js:171`，`BACKUP_LIMIT = 5`）。迁移里**绝对不要**用 `defaultSettings()` 重建对象——那会静默洗掉用户的每一个自定义值。
+5. **用户设置永远不许覆盖。** `sanitizeSettings()`（`client.js:1741`）是纯函数、**逐字段回落而不是整块回落**；未知键被收进 `PRESERVED_KEY`（`client.js:169`）下次读回；超范围原值记在 `outOfRangeOf`（`client.js:2256`）也会还回去；最近五次写入滚动存在备份环（`BACKUP_KEY`，`client.js:171`，`BACKUP_LIMIT = 5`）。迁移里**绝对不要**用 `defaultSettings()` 重建对象——那会静默洗掉用户的每一个自定义值。
    *不这么做会怎样：* 用户整套配置没了，而且不知道什么时候没的。唯一退路是 `window.__HOTLIST__.settings.backups()` / `.restore(i)`。
 
 6. **只有数据结构真的变了才动 `SETTINGS_VERSION`，并且迁移要同一个提交里写完。** 纯默认值调整、新增可选字段，只需要在 `sanitize*` 里给 fallback，不需要抬版本号。
@@ -824,10 +860,10 @@ tools/meru-tts/        TTS 小工具（生成提示音用，不参与插件运�
 7. **改 `client.js` 只需要刷新页面；改别的都要重启 GUI。** `index.js`、`package.json`、`cordis.patch.yml` 都在宿主启动时读（`/hotlist-sound` 路由就是那时建的）。已加载的客户端模块也不会热替换。
    *不这么做会怎样：* 你在调试旧代码，然后得出「改了没效果」的结论。
 
-8. **三个硬上限是写死的，不是设置项。** `PLAN_MAX_ROWS = 37`（`client.js:297`）从尾部裁、保住优先级头部；`MOTION_CONCURRENCY = 4`（`client.js:310`）限制同屏动效数；`PINNED_SEATS = {min: 0, max: 12}`（`client.js:294`）。
+8. **三个硬上限是写死的，不是设置项。** `PLAN_MAX_ROWS = 37`（`client.js:312`）从尾部裁、保住优先级头部；`MOTION_CONCURRENCY = 4`（`client.js:325`）限制同屏动效数；`PINNED_SEATS = {min: 0, max: 12}`（`client.js:309`）。
    *不这么做会怎样：* 你想靠调大 `maxSeats` 解决「计划被截断」，但 `maxSeats` 本身也超不过行上限。
 
-9. **判定优先级只有一个真源，而且是两个函数。** `classify()`（`client.js:2103-2161`）决定 tab 座位与弹出，`sidebarStateOf()`（`client.js:2976-3012`）决定侧栏图标；两者共用 `error > pending > completed > running > pinned > idle` 这个顺序，但附加条件不同。
+9. **判定优先级只有一个真源，而且是两个函数。** `classify()`（`client.js:2646-2704`）决定 tab 座位与弹出，`sidebarStateOf()`（`client.js:3519-3555`）决定侧栏图标；两者共用 `error > pending > completed > running > pinned > idle` 这个顺序，但附加条件不同。
    *不这么做会怎样：* 你只改了一个，同一个会话在两个面上显示成两个状态——4.6.0 之前就是这个 bug。
 
 10. **`dsh plugin add` 对已装的插件不会重写 bundle 条目，而且运行中的 GUI 占着文件。** 先 `remove` 再 `add`；覆盖安装前先关掉那个 profile 的 GUI，否则复制会以 `EPERM` 失败。

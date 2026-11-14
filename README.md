@@ -13,7 +13,7 @@ dsh plugin --profile <profile> add dsh-better-notice
 ```
 
 - Package: `dsh-better-notice` (module id is the same string)
-- Version: `5.3.0` (see [CHANGELOG.md](CHANGELOG.md))
+- Version: `5.3.1` (see [CHANGELOG.md](CHANGELOG.md))
 - License: MIT
 - Settings live in **account menu → Settings → “Better Notice”** (a `settings.section` entry, id `hotlist`, order `30`)
 
@@ -98,12 +98,12 @@ The **animated** clips live in `tools/attn-ring/media/` and belong to the super 
 | ⛔ `error` | The agent reported an error (`api-session/error`), expires after 10 min | — | ✅ | ✅ | ✅ | 🔈 |
 | 🔐 `pending` | Waiting for your approval / answer / plan review (secondary glyph ❓) | — | ✅ | ✅ | ✅ | 🔈 |
 | ✅ `completed` | This plugin saw it finish, within the last 7 min | — | ✅ | ✅ | ✅ | 🔈 |
-| ⏳ `running` | Working (includes “a subagent is running, parent idle”) | — | — | ✅ | — | — |
+| ⏳ `running` | Working (includes “a subagent is running, parent idle”) | ✅ | — | ✅ | — | — |
 | 🧊 `idle` | Idle, and last activity is inside the *recent window* (default 17 min) | ✅ | — | ✅ | — | — |
 
 ✅ = on by default · — = off by default · 🔈 = a bundled sound exists but **stays silent until you enable that category** in settings.
 
-The two seat surfaces **split the six categories** (see [The window top bar](#the-window-top-bar-windows-desktop)): `pinned` / `idle` take tab-row seats, `error` / `pending` / `completed` take top-bar pills, and `running` takes neither — a session is never drawn on both. All six still get a sidebar glyph.
+The two seat surfaces **split the six categories** (see [The window top bar](#the-window-top-bar-windows-desktop)): `pinned` / `idle` / `running` take tab-row seats, `error` / `pending` / `completed` take top-bar pills — a session is never drawn on both. All six still get a sidebar glyph. (`running` joined the tab row in 5.3.1; before that it took neither surface, which meant a running session was invisible in the tab row.)
 
 ### How a session is classified
 
@@ -131,7 +131,7 @@ dsh plugin --profile <profile> add dsh-better-notice
 dsh --profile <profile>
 ```
 
-- **Published on npm:** [dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice) (current `5.3.0`). If npm is unreachable, the same tarball is attached to the [latest release](https://github.com/MeruSu/better-notice/releases) — `dsh plugin --profile <profile> add <absolute path>/dsh-better-notice-5.3.0.tgz` gives the same result and the same restart.
+- **Published on npm:** [dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice) (current `5.3.1`). If npm is unreachable, the same tarball is attached to the [latest release](https://github.com/MeruSu/better-notice/releases) — `dsh plugin --profile <profile> add <absolute path>/dsh-better-notice-5.3.1.tgz` gives the same result and the same restart.
 - **Use an absolute path, forward slashes** when you install from a local directory instead of the registry: `dsh plugin` forwards the argument to pnpm *inside the profile directory*, so a relative path points into the profile.
 - Installing from a directory uses `link:` — code edits need no reinstall. `client.js` changes apply on page refresh; `index.js` / `cordis.patch.yml` / `package.json` changes need a GUI restart.
 - Install from a git checkout when you also want the TTS helper (see [Sounds](#sounds-and-the-bundled-tts-tool)). The npm package's `files` field ships `index.js`, `client.js`, `cordis.patch.yml`, `assets`, `locale`, `icon.svg` `tools/attn-ring` and `tools/audio-endpoint`; `tools/meru-tts` is **not** in it.
@@ -156,7 +156,7 @@ The host route is created during process start-up, so a page refresh is not enou
 
 In the GUI's browser console:
 
-1. `window.__HOTLIST_VERSION__` → the version string, e.g. `'5.3.0'`.
+1. `window.__HOTLIST_VERSION__` → the version string, e.g. `'5.3.1'`.
 2. `Object.keys(window.__HOTLIST__)` → `['version','settings','assets']`.
 3. Settings → the left nav has **“Better Notice”**, and the page shows a global block plus **6** collapsible category cards.
 4. Session rows in the sidebar now start with a status glyph.
@@ -209,7 +209,7 @@ On Windows the GUI has a 40 px title strip above everything. The plugin can draw
 - The band is a transparent overlay with `pointer-events:none`; only the pills take clicks and they are marked `-webkit-app-region:no-drag`, so **the drag strip stays draggable**. The 40 px strip belongs to the window, not to us.
 - The left edge is measured with a hit test (`elementsFromPoint`): only an element that hugs the left edge *and* is at most 480 px wide counts as occupying space. A full-width container would otherwise push the pills off-screen.
 - The right side reserves a hard-coded `WINDOW_CONTROLS_GUARD = 138` px for the window buttons. It is **not a setting**.
-- `running` never appears here, and the current session is skipped. A session shows on **one** surface only (`error`/`pending`/`completed` on the band, `pinned`/`idle` in the tab row).
+- `running` never appears here, and the current session is skipped. A session shows on **one** surface only (`error`/`pending`/`completed` on the band, `pinned`/`idle`/`running` in the tab row).
 - **A pill animates for as long as it is on screen.** That is deliberate: a frozen band next to a moving sidebar icon reads as broken. On top of the always-on loop, a frequency hit plays the same motion **once more** as a burst; `prefers-reduced-motion` (or `display.reduceMotion: 'on'`) stops both. The band carries its own keyframes, so it animates with the sidebar adapter off.
 - macOS: not supported, and it will not be. Nothing to attach to.
 
@@ -227,11 +227,11 @@ All three modes **strip the emoji already in the session title**, so you never g
 
 ### Custom icon scope — which categories borrow the title emoji
 
-`topbar.customScope.<category>` is six booleans, and it **only applies to the `custom` mode**. Turning a category off there means that category keeps drawing the plugin's own glyph even when the title starts with an emoji.
+`topbar.customScope.<category>` is six booleans, and it **only applies to the `custom` mode**. Turning a category off there means that category keeps drawing the plugin's own glyph even when the title starts with an emoji. Since 5.3.1 the default is **`pinned` only** — the band is the pinned row by default, so letting every category borrow a title emoji would make the pills look like whatever the user typed.
 
 | Field | Values | Default |
 |---|---|---|
-| `topbar.customScope.{pinned,error,pending,completed,running,idle}` | `true` / `false` | all six `true` |
+| `topbar.customScope.{pinned,error,pending,completed,running,idle}` | `true` / `false` | `pinned` only |
 
 Settings shows this as six chips on the second row of the category card, and the whole row disappears while the mode is `text` or `icon`, because it would do nothing there.
 
@@ -303,7 +303,7 @@ Windows only, and it covers the primary display — see
 
 Field reference tables are below; this section is organized by intent. Everything here is editable in **Settings → “Better Notice”** and applies immediately, no reload. The few rows marked *API only* have no control yet — use `window.__HOTLIST_SETTINGS__.set(...)`.
 
-**Baseline:** you do not have to configure anything. Defaults are “6 tab seats + sidebar glyphs + popouts on three categories + all sounds silent”.
+**Baseline:** you do not have to configure anything. Defaults are “7 tab seats + sidebar glyphs + popouts on three categories + cues on three categories”.
 
 ### Placement — where it shows up
 
@@ -317,7 +317,7 @@ Each surface has its own master switch (`positions.tab` / `positions.sidebar` / 
 
 > **The top bar is Windows-only, and macOS will never get it.** On Windows desktop the plugin draws into the 40 px title strip; in a browser tab the band stays down unless you switch on `topbar.previewInWeb`. On **macOS it is not supported and will not be**: the host's top region behaves differently there, so there is nothing to attach to. Do not tell a Mac user to wait for it.
 >
-> The top bar and the tab row **coexist** — neither replaces the other. They split the six categories instead: `error` / `pending` / `completed` live in the band, `pinned` / `idle` take tab seats, and `running` deliberately appears on **neither** (it is not news). Both surfaces draw from the same classification, so a session never shows up as two different states.
+> The top bar and the tab row **coexist** — neither replaces the other. They split the six categories instead: `error` / `pending` / `completed` live in the band, `pinned` / `idle` / `running` take tab seats (5.3.1 moved `running` into the tab row; it used to appear on neither). Both surfaces draw from the same classification, so a session never shows up as two different states.
 
 Per-category placement is a second layer: `categories.<id>.surfaces.{tab,sidebar,topbar}` decides whether *that* category may appear on *that* surface. Settings shows these as read-only chips; change them through the API.
 
@@ -325,7 +325,7 @@ Per-category placement is a second layer: `categories.<id>.surfaces.{tab,sidebar
 
 | I want… | Field | Values | Default |
 |---|---|---|---|
-| Limit tab seats | `maxSeats` | `1`–`12`, or `'auto'` (fit the real width) | `6` |
+| Limit tab seats | `maxSeats` | `1`–`12`, or `'auto'` (fit the real width) | `7` |
 | Limit how many pinned sessions get seats | `pinned.maxSeats` | `0`–`12` (`0` = hide pinned entirely) | `3` |
 
 ### Time — how long things stay hot
@@ -346,7 +346,7 @@ Category ids: `pinned` · `error` · `pending` · `completed` · `running` · `i
 | Turn a whole category off | `categories.<id>.enabled` | `true` / `false` | all six `true` |
 | Decide where that category sits | `categories.<id>.order` | `1`–`99` | `error 10 / pending 10 / pinned 60 / completed 20 / running 30 / idle 50` |
 | Sort within the category | `categories.<id>.sortBy` | `'time'` (recent activity first) / `'manual'` (host pin order) | `'time'` (`pinned` = `'manual'`) |
-| Restrict it to some surfaces | `categories.<id>.surfaces.{tab,sidebar,topbar}` | three booleans | `tab` for `pinned`/`idle`, `topbar` for `error`/`pending`/`completed`, `sidebar` for all; `running` has none of the first two |
+| Restrict it to some surfaces | `categories.<id>.surfaces.{tab,sidebar,topbar}` | three booleans | `tab` for `pinned`/`idle`/`running`, `topbar` for `error`/`pending`/`completed`, `sidebar` for all |
 | Choose where the icon comes from | `categories.<id>.glyph.source` | `'emoji'` / `'upload'` / `'popout'` | `'emoji'` |
 | Change the glyph character | `categories.<id>.glyph.value` | emoji, at most 8 code points | per category, see the table above |
 | Use your own square image | `categories.<id>.glyph.uploads` | up to 6, ≤16 KB each, `png/jpeg/webp/gif` | `[]` |
@@ -359,7 +359,7 @@ Category ids: `pinned` · `error` · `pending` · `completed` · `running` · `i
 | Ambient motion while it waits | `categories.<id>.popout.ambient` | `none` / `breath` / `float` | `breath` on the popping three |
 | How it leaves | `categories.<id>.popout.exit` | `drop` / `particles` / `fade` / `slide-out` | `drop` |
 | Which edge it comes from | `categories.<id>.popout.side` | `'auto'` (random each time) / `'left'` / `'right'` (mirrored) | `'auto'` |
-| Play a sound for this category | `categories.<id>.sound.enabled` | `true` / `false` | `true` for `error` / `pending` / `pinned` / `completed` |
+| Play a sound for this category | `categories.<id>.sound.enabled` | `true` / `false` | `true` for `error` / `pending` / `completed` |
 | Built-in cue or your own | `categories.<id>.sound.builtin` / `.uploads` | `true` / `[]`; ≤6, ≤128 KB each | `true` / `[]` |
 
 `pending` has one extra field: `categories.pending.glyphSecondary` (same shape as `glyph`, default `❓`).
@@ -372,7 +372,7 @@ Picking is automatic and uses two different rules: **glyphs are seeded by identi
 
 ### Sounds ship as exactly two files
 
-`assets/sounds/attention.wav` serves `error` and `pending`; `assets/sounds/complete.wav` serves `completed`. `error`, `pending`, `pinned` and `completed` ship with `sound.enabled: true` (since 4.6.3); `running` and `idle` stay off. To generate your own lines, see [Sounds and the bundled TTS tool](#sounds-and-the-bundled-tts-tool).
+`assets/sounds/attention.wav` serves `error` and `pending`; `assets/sounds/complete.wav` serves `completed`. `error`, `pending` and `completed` ship with `sound.enabled: true` (since 4.6.3; `pinned` kept it until 5.3.1 and is now off — it had no bundled cue to play anyway); `running` and `idle` stay off. To generate your own lines, see [Sounds and the bundled TTS tool](#sounds-and-the-bundled-tts-tool).
 
 ### Headphones only — the strict audio gate
 
@@ -414,6 +414,41 @@ If the switch is on and you hear nothing, run `__HOTLIST__.audio()`: `state:
 "measured"` + `kindGuess: "speakers"` is the gate working as designed, and
 `error: "script-missing"` means the install is partial.
 
+### The device list — one-time setup for the gate
+
+The gate above judges by **device type**: if the probe says "headphones", it plays. That is a guess made by Windows, and Windows is often wrong — a Bluetooth headset can report as `speakers`, and some drivers report nothing at all. The device list replaces the guess with **your own list**:
+
+> **Settings → “Super reminder” → the device-list row → `{Configure}`** copies a prompt to the clipboard. Paste it into your own AI (any agent that can run PowerShell on this machine). It enumerates the audio devices, groups them, marks the headphones, and writes the result to a config file. The plugin only reads that file.
+
+You do not have to set it up. With no list, the gate keeps judging by type — **configuring is an addition, never a prerequisite**.
+
+**What the row tells you** (the short status next to the buttons):
+
+| Status | Meaning |
+|---|---|
+| *Not set up · judging by device type* | no config file: the type-based gate above is in force |
+| *Configured: N devices (M headphones)* | the list is read and has headphones in it |
+| *Configured, but no headphone was marked* | the file parses but nothing is grouped as headphones — falls back to type |
+| *File is not readable* | the file exists but does not parse (bad JSON, wrong `version`, `devices` not an array) — falls back to type |
+
+Plus two environmental states: *Windows only* (the probe does not exist elsewhere) and *cannot read the status* (the host half is unreachable — nothing is remembered, because a stale “configured” line is worse than none).
+
+**How the decision changes once a list exists** — same function, one extra step in front:
+
+1. `audio.smart` is off → play. Nothing else is consulted (unchanged).
+2. The probe is missing, stale (>60 s), unmeasured or errored → **silent** (`audio-unknown`, unchanged).
+3. **A list with headphones exists** → the current default output must match one of those headphones **by name**. Match → play; no match → **silent** (`not-headphones`). This is a **whitelist**: a list that does not contain your current device means silence, not "fall back to guessing".
+4. No list, an unreadable list, or a list without headphones → the old type-based rule (`kindGuess === 'headphones'`).
+
+**Name matching, in this order** — exact, then equal after normalising, then containment:
+
+- normalising = drop every `(…)` / `（…）` model suffix, collapse runs of whitespace, trim, lowercase;
+- containment counts **only when both names are at least 6 characters long**. Windows really does have a device whose friendly name is just *耳机* / *Speakers*; without the floor, that one entry would match every device on the machine — including someone else's.
+
+**The file**: `<DSH_HOME>\hotlist-audio.json` (`DSH_HOME` if set, otherwise `%USERPROFILE%\.dsh`). `<DSH_HOME>` is where the host resolves it; the page never builds that path itself — the host returns the absolute path it actually reads, and the prompt carries **that** path plus the absolute path of the enumeration script, so the file your AI writes and the file the host reads are the same one by construction. Press **File location** to see it; the row also has **Re-read** — and the list is re-read **on its own every 60 s**, so you can copy the prompt, go talk to your AI, and come back to a row that already changed.
+
+`window.__HOTLIST__.audio()` exposes the same state machine plus a `config` summary — see [JavaScript API](#javascript-api).
+
 ### Classification priority is fixed
 
 Top to bottom, first match wins: **error > pending > completed > running > pinned > idle**. It is deliberately not exposed to users (it changes meaning, not appearance). What *is* configurable per category is display order (`order`) — a different thing.
@@ -429,14 +464,14 @@ Field-name-level documentation for people writing scripts.
 - **Collapsed card:** glyph preview, category name, `· order N`, five read-only chips (Tab / Bar / Top / Pop / Snd — highlighted = on), caret. Click the row to expand; **several cards may be open at once**. Open state lives in `sessionStorage` (`dsh.hotlist.open`), never in settings.
 - **Expanded area** (compact multi-column): ① glyph (source / upload / value / frequency slider); ② motion (`motion` + target `glyph`/`row`); ③ popout (enabled / image / entrance·ambient·exit / side·display time); ④ sound (enabled / source / preview); ⑤ order.
 - **Global block:** scope (workspace / all / smart), seat limit, **pinned seats**, completed TTL in minutes, global volume, **recent window** (minutes), `positions.tab`, `positions.topbar`, `positions.sidebar` (API only), `takeOverStatusDot`. The band block (style / label display / pill count / pill width / web preview) only exists while `positions.topbar` is on.
-- **Super reminder block**, directly below the global block: `ring.pending`, `ring.error`, `ring.completed` — all off — plus the **Headphones only** gate (`audio.smart`, also off). See [The super reminder](#the-super-reminder) and [Headphones only](#headphones-only--the-strict-audio-gate).
+- **Super reminder block**, directly below the global block: `ring.pending`, `ring.error`, `ring.completed` — all off — plus the **Headphones only** gate (`audio.smart`, also off) and, right under it, the **device list** row (status + `{Configure}` / Re-read / File location). See [The super reminder](#the-super-reminder), [Headphones only](#headphones-only--the-strict-audio-gate) and [The device list](#the-device-list--one-time-setup-for-the-gate).
 - Out-of-range writes are clamped. A failed write (localStorage quota) is reported in the page footer and through `window.__HOTLIST_SETTINGS__.lastError()`.
 
 ### Global defaults
 
 | Setting | Default | Range / notes |
 |---|---|---|
-| `maxSeats` | `6` | `1`–`12`, or `'auto'` (follows the real tab-row width) |
+| `maxSeats` | `7` | `1`–`12`, or `'auto'` (follows the real tab-row width) |
 | `positions.tab` | `true` | master switch for tab seats |
 | `positions.sidebar` | `true` | master switch for the sidebar (no settings row; API only) |
 | `positions.topbar` | `true` | Windows desktop title strip; no effect in a browser unless `topbar.previewInWeb` |
@@ -447,11 +482,11 @@ Field-name-level documentation for people writing scripts.
 | `topbar.chipWidthPct` | `0` | **percent**, `-30`…`+30`; `0` reproduces the shipped widths exactly |
 | `topbar.previewInWeb` | `false` | draw the band in a browser too |
 | `topbar.rightReservePx` | `0` | `0`–`400` px (no settings row; API only) |
-| `topbar.customScope` | all `true` | six booleans, only read in `custom` mode |
+| `topbar.customScope` | `pinned` only | six booleans, only read in `custom` mode |
 | `choices` | `{}` | keys the user actually picked; written by `writeSettings()`, never by hand |
 | `takeOverStatusDot` | `true` | take over the status dot drawn by other plugins (`dsh-sessions-manager`) |
 | `ring.pending` / `ring.error` / `ring.completed` | all `false` | one super reminder on top of the screen when that state appears; Windows only, primary display only — see [The super reminder](#the-super-reminder) |
-| `audio.smart` | `false` | **strict** headphones gate: plays only when the default output is measured as headphones; unknown output (failed probe, no `pwsh`, non-Windows) also stays silent — see [Headphones only](#headphones-only--the-strict-audio-gate) |
+| `audio.smart` | `false` | **strict** headphones gate: plays only when the default output is measured as headphones (or, once a device list exists, when it matches a listed headphone by name); unknown output (failed probe, no `pwsh`, non-Windows, no name match) also stays silent — see [Headphones only](#headphones-only--the-strict-audio-gate) and [The device list](#the-device-list--one-time-setup-for-the-gate) |
 | `hideNativeDot` | `true` | hide the host's native status slot (no settings row since 4.4; field kept) |
 | `collect.completedTtlMs` | `420000` (7 min) | 1–1440 minutes |
 | `collect.recentWindowMinutes` | `17` | **minutes**. Settings offers `1`–`120`; API also accepts `0` (= hide `idle`) |
@@ -469,7 +504,7 @@ Field-name-level documentation for people writing scripts.
 | `enabled` | all six `true` | off = no classification, no seat, no sidebar glyph |
 | `order` | `10`…`50` | 1–99, display order only; `error` and `pending` tie at `10`, resolved by classification priority |
 | `sortBy` | `'time'` (`pinned`: `'manual'`) | `time` = recent activity first; `manual` = host pin order |
-| `surfaces.tab` / `.sidebar` / `.topbar` | `pinned`+`idle`: `true`/`true`/`false` · `error`+`pending`+`completed`: `false`/`true`/`true` · `running`: `false`/`true`/`false` | read-only chips in settings |
+| `surfaces.tab` / `.sidebar` / `.topbar` | `pinned`+`idle`+`running`: `true`/`true`/`false` · `error`+`pending`+`completed`: `false`/`true`/`true` | read-only chips in settings |
 | `glyph.source` | `'emoji'` | `emoji` / `upload` / `popout` (reuse that category's popout art) |
 | `glyph.value` | per category | emoji, at most 8 code points |
 | `glyph.uploads` | `[]` | up to 6, ≤16 KB each, `png/jpeg/webp/gif` (**no SVG**) |
@@ -481,7 +516,7 @@ Field-name-level documentation for people writing scripts.
 | `popout.displayMs` | `7000` | 2000–20000, 500 ms steps |
 | `popout.entrance` | `'slide'` | **read-only**, fixed clip reveal |
 | `popout.ambient` / `.exit` / `.side` | `breath` / `drop` / `'auto'` | idle motion / exit / edge |
-| `sound.enabled` | `true` for `error` / `pending` / `pinned` / `completed`, otherwise `false` | per-category sound switch |
+| `sound.enabled` | `true` for `error` / `pending` / `completed`, otherwise `false` | per-category sound switch |
 | `sound.builtin` | `true` | `true` = bundled wavs: `pending`/`error` → `attention.wav`, `completed` → `complete.wav` |
 | `sound.uploads` | `[]` | up to 6, ≤128 KB each |
 
@@ -491,14 +526,14 @@ Read this part before touching anything. The user says one sentence; map it to a
 
 | The user says | What it actually is | Change | Suggested value |
 |---|---|---|---|
-| “It's too noisy” | Usually motion or popouts — four categories do play a cue by default | sound: `sound.enabled` / `sound.volume`; motion: `glyph.frequency`; popout: `popout.enabled` | `sound.volume: 20`–`30`; `glyph.frequency: 0.1`–`0.3`; or turn the three `popout.enabled` off |
+| “It's too noisy” | Usually motion or popouts — three categories do play a cue by default | sound: `sound.enabled` / `sound.volume`; motion: `glyph.frequency`; popout: `popout.enabled` | `sound.volume: 20`–`30`; `glyph.frequency: 0.1`–`0.3`; or turn the three `popout.enabled` off |
 | “The blinking is annoying” | Motion, not sound | `glyph.frequency` down or `0`; global switch `display.reduceMotion = 'on'` | `frequency: 0` freezes that category |
 | “Too cluttered” | Reduce quantity first, then surfaces | `maxSeats`; then `positions.sidebar = false` | `maxSeats: 3`–`4` |
 | “Only tell me when I have to act” | Keep `error` + `pending` only | turn `surfaces` off for `completed`/`running`/`idle` | `{tab:false,sidebar:false,topbar:false}` on those three |
 | “Make it more obvious” | Add popout/sound/motion | `popout.enabled`, `sound.enabled`, `frequency` up | `popout.displayMs: 12000`, `frequency: 1`, `overlay.sizeMin/sizeMax` up |
 | “I can't see category X” | Three switches in order | ① `categories.<id>.enabled` ② its `surfaces` ③ for `idle`, the recent window | ① must be `true` ② that surface's bit must be `true` ③ `recentWindowMinutes > 0` |
 | “Only make a sound when I'm wearing headphones” | The strict audio gate, not a volume fix | `audio.smart = true` | on the user's request only; tell them unknown output means silence, and `__HOTLIST__.audio()` explains why nothing plays |
-| “I turned on headphones-only and now it never beeps” | The gate refusing, by design | read `__HOTLIST__.audio()` before changing anything | `kindGuess: 'speakers'` / `state: 'unknown'` = working as designed; do **not** “fix” it by loosening the gate |
+| “I turned on headphones-only and now it never beeps” | The gate refusing, by design | read `__HOTLIST__.audio()` before changing anything | `kindGuess: 'speakers'` / `state: 'unknown'` = working as designed; `config.status` tells you what the device list sees; do **not** “fix” it by loosening the gate |
 | “My change did nothing” | Depends what changed | `client.js` → refresh page; `index.js` → **restart GUI**; a setting → check `lastError()`, it was probably clamped | — |
 | “When does the top bar work?” | Windows desktop only (macOS never) | `positions.topbar` + `topbar.previewInWeb` for the browser | `true` by default on Windows; in a browser only with the preview switch |
 | “How do I pin / unpin?” | Not ours | the host's own sidebar row menu | we only read it; `pinned.maxSeats` limits how many show |
@@ -526,7 +561,7 @@ Rules for agents:
 
 ## Sounds and the bundled TTS tool
 
-**First, the good news: nothing has to be installed to hear something.** Two cue files ship with the plugin — `attention.wav` for `error` and `pending`, `complete.wav` for `completed`. `sound.enabled` is already `true` for `error` / `pending` / `pinned` / `completed` (since 4.6.3); note that `pinned` has the switch on but **no bundled cue** — give it one of your own if you want it to make a sound. `running` and `idle` stay silent until you turn them on. **Sounds can also be limited to headphones** — see [Headphones only](#headphones-only--the-strict-audio-gate); it is one switch and it is off by default. The rest of this section only matters if you want **new lines** or **different voices**.
+**First, the good news: nothing has to be installed to hear something.** Two cue files ship with the plugin — `attention.wav` for `error` and `pending`, `complete.wav` for `completed`. `sound.enabled` is already `true` for `error` / `pending` / `completed` (since 4.6.3; `pinned` had it on until 5.3.1 and is now off — it has no bundled cue anyway, so nothing changes audibly). `running` and `idle` stay silent until you turn them on. **Sounds can also be limited to headphones** — see [Headphones only](#headphones-only--the-strict-audio-gate); it is one switch and it is off by default. The rest of this section only matters if you want **new lines** or **different voices**.
 
 ### 1. No local text-to-speech? Use the helper in this repository
 
@@ -620,7 +655,7 @@ s.lastError()      // last storage write error (string or null)
 
 // settings + the three asset pools
 const api = window.__HOTLIST__;
-api.version                                        // '5.3.0'
+api.version                                        // '5.3.1'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }
@@ -631,7 +666,7 @@ api.assets.preview('pending')                      // play a cue now → boolean
 
 // read-only probes, for scripts and acceptance tests
 api.topbar()                                       // → { mounted, mode, titleMode, left, leftSource, measured, reserve, currentId, capacity, chips }
-api.audio()                                        // → { smart, state, kindGuess, name, error, asOf, pass } | null before the player mounts
+api.audio()                                        // → { smart, state, kindGuess, name, error, asOf, pass, config } | null before the player mounts
 api.export({ format: 'md' })                       // session list as md | txt | json (a bare call works)
 ```
 
@@ -640,7 +675,7 @@ api.export({ format: 'md' })                       // session list as md | txt |
 - `add`'s `reason` is one of `invalid` / `full` / `refused` / `budget`.
 - `export()`: `format` is `md` | `txt` | `json` (**not** `markdown`); explicit `ids` win over `scope`; `md`/`txt` carry a BOM, `json` does not; the call is pure, so two exports of one snapshot are byte-identical.
 - `topbar()` never writes. `leftSource` tells you whether the band's left edge came from `occupied` (a hit test), `menu` or `fallback` — that is what the acceptance script reads.
-- `audio()` never writes either. `pass` is the answer the gate would give **right now**: with the switch off it is always `true`, with it on it is `false` until the probe has measured a pair of headphones. `null` means the sound player has not mounted yet.
+- `audio()` never writes either. `pass` is the answer the gate would give **right now**: with the switch off it is always `true`, with it on it is `false` until the current output is known to be headphones. `null` means the sound player has not mounted yet. Its `config` field is the device list's own summary — `{ status, exists, valid, path, script, platform, deviceCount, headphoneCount, guessCount, updatedAt }`, where `status` is one of `missing` / `ready` / `empty` / `invalid` / `unsupported` / `hostDown`. Read it before guessing why a configured list is not taking effect.
 
 **Two traps:**
 
@@ -664,13 +699,14 @@ More examples (bulk import, loading assets from URLs, the three preview paths) i
 11. **Sounds have a 1.5 s global throttle.** A cue arriving less than 1500 ms after the previous one is dropped; the first round after a cold start only records. This is verified by source and unit test (group `sound player dedupe`) — on a real machine it is hard to produce two genuine transitions that fast.
 12. **Settings are bound to the page origin.** `localStorage` belongs to the origin, so a different GUI port means a different origin.
 13. **The super reminder is Windows-only and covers the primary display.** The script is PowerShell + WPF, and the page can only *ask* the host to run it: on other platforms the switch saves your choice and nothing rises. It also covers the primary screen only, so a second monitor does not flash.
-14. **The headphones gate is strict on purpose, and Windows-only.** With `audio.smart` on, a cue plays only when the probe has *measured* the default output as headphones. A failed probe, a timeout, a missing `pwsh`, a non-Windows host — all of them mean **silence**, not "probably fine". `__HOTLIST__.audio()` tells you which of those you are looking at.
+14. **The headphones gate is strict on purpose, and Windows-only.** With `audio.smart` on, a cue plays only when the probe has *measured* the default output as headphones, or (since 5.3.1, once you have configured a device list) when the current output matches a headphone in your list by name. A failed probe, a timeout, a missing `pwsh`, a non-Windows host, a list without a match — all of them mean **silence**, not "probably fine". `__HOTLIST__.audio()` tells you which of those you are looking at: `pass` is the verdict, `config.status` is the list's own state.
+15. **The device list is per machine, and the plugin does not write it.** It lives at `<DSH_HOME>\hotlist-audio.json` outside `localStorage`, so it is not copied by settings export/backup and not synced between machines — each machine needs its own `{Configure}` prompt run. It is also not a security boundary: it only renames which devices count as headphones, and the probe underneath still has to succeed.
 
 ## Modifying this plugin
 
 For anyone — human or AI — who has to change behaviour. Goal: read this, find the place, verify it yourself, no follow-up questions.
 
-> **About line numbers:** `client.js:NNN` below are positions at the 5.3.0 release and are only a **starting point**. They drift as soon as the file changes, so search by **symbol name** (`grep -n 'function classify' client.js`). Mismatched line numbers are normal; the symbol name is the truth. Same for `test/classify.test.mjs`: group names are stabler than line numbers.
+> **About line numbers:** `client.js:NNN` below are positions at the 5.3.1 release and are only a **starting point**. They drift as soon as the file changes, so search by **symbol name** (`grep -n 'function classify' client.js`). Mismatched line numbers are normal; the symbol name is the truth. Same for `test/classify.test.mjs`: group names are stabler than line numbers.
 
 ### Architecture in one paragraph
 
@@ -693,24 +729,24 @@ ctx.get('uiWorkspace').workspaces.list             ← workspace grouping + pinn
 ctx.remote.$on('api-session/error', …)             ← agent-level errors
                  │
                  ▼
-        classify()       category + token          client.js:2103
-        sortSeats()      ordering within a category client.js:2169
-        buildSeatPlan()  apply limits, assign order client.js:2192
+        classify()       category + token          client.js:2646
+        sortSeats()      ordering within a category client.js:2712
+        buildSeatPlan()  apply limits, assign order client.js:2735
                  │
      ┌───────────┴────────────┬──────────────────┐
      ▼                        ▼                  ▼
 mountTabSeats()        createSidebarAdapter()  HotlistSettingsPage()
 tab seats (conversation.view)   sidebar DOM      settings page (settings.section)
-client.js:5667                client.js:3014    client.js:3762
+client.js:6391                client.js:3557    client.js:4308
 ```
 
-The three pure functions (`classify` / `sortSeats` / `buildSeatPlan`) never touch the DOM and can be fed fake data — they are the safest entry point for behaviour changes. Their results are also the only debugging handle besides `window.__HOTLIST__`: the export table at the end of `client.js` (`client.js:7058` onwards) exposes `classify`, `sortSeats`, `buildSeatPlan`, `readSettings`, `defaultSettings`, `sanitizeSettings`, `sidebarStateOf`, `HotlistSettingsPage` and more, and the unit tests run the real source through it.
+The three pure functions (`classify` / `sortSeats` / `buildSeatPlan`) never touch the DOM and can be fed fake data — they are the safest entry point for behaviour changes. Their results are also the only debugging handle besides `window.__HOTLIST__`: the export table at the end of `client.js` (`client.js:7791` onwards) exposes `classify`, `sortSeats`, `buildSeatPlan`, `readSettings`, `defaultSettings`, `sanitizeSettings`, `sidebarStateOf`, `HotlistSettingsPage` and more, and the unit tests run the real source through it.
 
 ### Touch points: change one thing, change these
 
 **1) Add a category**
 
-`CATEGORY_IDS` (`client.js:184`) → `CATEGORY_ORDER` (`client.js:185`) → `CATEGORY_GLYPHS` (`client.js:204`) → `CATEGORY_MOTION` (`client.js:205`) → `CATEGORY_SURFACES` (`client.js:263`, value is `{tab, sidebar, topbar}`) → defaults in `defaultCategory()` (`:359`) → accept the key in `sanitizeSettings()` (`:1192`) → one rule in `classify()` (`:2082`) → one entry each in the dictionaries `ZH` (`:497`) / `EN` (`:696`) → one new group in `test/classify.test.mjs`. Missing `CATEGORY_GLYPHS` usually just means a blank icon; missing `CATEGORY_SURFACES` throws inside `defaultCategory()`.
+`CATEGORY_IDS` (`client.js:184`) → `CATEGORY_ORDER` (`client.js:185`) → `CATEGORY_GLYPHS` (`client.js:204`) → `CATEGORY_MOTION` (`client.js:205`) → `CATEGORY_SURFACES` (`client.js:278`, value is `{tab, sidebar, topbar}`) → defaults in `defaultCategory()` (`:359`) → accept the key in `sanitizeSettings()` (`:1192`) → one rule in `classify()` (`:2082`) → one entry each in the dictionaries `ZH` (`:497`) / `EN` (`:696`) → one new group in `test/classify.test.mjs`. Missing `CATEGORY_GLYPHS` usually just means a blank icon; missing `CATEGORY_SURFACES` throws inside `defaultCategory()`.
 
 **2) Add a setting**
 
@@ -718,7 +754,7 @@ Five places, or you get “writes but does not read” / “Chinese leaking into
 
 **3) Add a motion**
 
-Add the name to `MOTION_NAMES` (`client.js:272`) → a duration to `MOTION_MS` (`client.js:2746`) → a `@keyframes hl-<name>` to `SIDEBAR_STYLE` (`client.js:2768`) (animate `transform` / `opacity` only, never layout-triggering properties) → for the title variant, one entry each in `TEXT_MOTION` (`client.js:2755`) and `TEXT_BURST` (`client.js:2762`) plus `@keyframes hl-text-<name>`. Concurrency is capped by `MOTION_CONCURRENCY` (`client.js:310`).
+Add the name to `MOTION_NAMES` (`client.js:287`) → a duration to `MOTION_MS` (`client.js:3289`) → a `@keyframes hl-<name>` to `SIDEBAR_STYLE` (`client.js:3311`) (animate `transform` / `opacity` only, never layout-triggering properties) → for the title variant, one entry each in `TEXT_MOTION` (`client.js:3298`) and `TEXT_BURST` (`client.js:3305`) plus `@keyframes hl-text-<name>`. Concurrency is capped by `MOTION_CONCURRENCY` (`client.js:325`).
 
 **4) Add a popout-art slot**
 
@@ -726,7 +762,7 @@ Art is `assets/<category>-<tier>.webp` (static tiers 64 / 320 / 780 / 1560, 681 
 
 **5) Replace a bundled sound**
 
-`BUILTIN_SOUND` (`client.js:330`) is the only table mapping category → filename (`SOUND_CATEGORIES` (`client.js:332`) is derived from it). Put the new wav in `assets/sounds/`, edit the table, keep `assets/sounds/manifest.json` in sync. The URL is built from `SOUND_URL` (`client.js:329`) as `/hotlist-sound/<file>`; the actual serving is `serveSound()` in `index.js` — a **GUI restart is mandatory** (host routes register at start-up).
+`BUILTIN_SOUND` (`client.js:345`) is the only table mapping category → filename (`SOUND_CATEGORIES` (`client.js:347`) is derived from it). Put the new wav in `assets/sounds/`, edit the table, keep `assets/sounds/manifest.json` in sync. The URL is built from `SOUND_URL` (`client.js:344`) as `/hotlist-sound/<file>`; the actual serving is `serveSound()` in `index.js` — a **GUI restart is mandatory** (host routes register at start-up).
 
 **6) Change ordering or priority**
 
@@ -740,10 +776,10 @@ Sidebar titles can carry a CSS animation; **tab seats cannot** — the tab label
 
 - Field: `settings.categories.<id>.glyph.motionTarget`
 - Values: `'glyph'` = icon only; `'row'` = icon + title, started and stopped together.
-- **Since 4.6.0 the default is `'row'`** (`defaultGlyph()`, `client.js:355`).
+- **Since 4.6.0 the default is `'row'`** (`defaultGlyph()`, `client.js:834`).
 
 ```js
-// Option A: change the default for every category (source edit, defaultGlyph() at client.js:355)
+// Option A: change the default for every category (source edit, defaultGlyph() at client.js:834)
 function defaultGlyph(category) {
   return {
     kind: 'emoji',
@@ -758,7 +794,7 @@ function defaultGlyph(category) {
 ```
 
 ```js
-// Option B: per category (source edit, override inside defaultCategory() at client.js:368)
+// Option B: per category (source edit, override inside defaultCategory() at client.js:847)
 // e.g. only "pending" animates its title, everything else animates the icon only:
 glyph: { ...defaultGlyph(category), motionTarget: category === 'pending' ? 'row' : 'glyph' },
 ```
@@ -772,16 +808,16 @@ window.__HOTLIST_SETTINGS__.set({
 
 **Option C has a trap you must know:** `set` merges only two levels, and `glyph` / `popout` / `sound` are replaced as whole blocks — the line above resets `pending.glyph`'s `value`, `motion` and `frequency`. Do `get()`, edit the whole object, `set()`.
 
-Adding a new title motion: one entry each in `TEXT_MOTION` (`client.js:2755`, looping) and `TEXT_BURST` (`client.js:2762`, one-shot), a duration in `MOTION_MS` (`client.js:2746`), and `@keyframes hl-text-<name>` in `SIDEBAR_STYLE` (`client.js:2768`). Title keyframes **only animate `opacity` and 1–2 px of translation, never `scale`** (text goes blurry); concurrency is still capped by `MOTION_CONCURRENCY` (`client.js:310`) and the rate is the per-category `glyph.frequency` (0–1, `0` = never).
+Adding a new title motion: one entry each in `TEXT_MOTION` (`client.js:3298`, looping) and `TEXT_BURST` (`client.js:3305`, one-shot), a duration in `MOTION_MS` (`client.js:3289`), and `@keyframes hl-text-<name>` in `SIDEBAR_STYLE` (`client.js:3311`). Title keyframes **only animate `opacity` and 1–2 px of translation, never `scale`** (text goes blurry); concurrency is still capped by `MOTION_CONCURRENCY` (`client.js:325`) and the rate is the per-category `glyph.frequency` (0–1, `0` = never).
 
 ### Upgrades never overwrite user settings
 
-**Promise: upgrading the plugin never changes a setting the user already chose.** A value that still equals one of our own earlier factory defaults is not a choice — it follows the current default (the `LEGACY_VALUES` bullet below). Everything else on disk wins. A field the user *did* pick is his even when the value coincides with a preset: `choices` (`client.js:1988`) records those picks and the preset rule reads it before rewriting anything.
+**Promise: upgrading the plugin never changes a setting the user already chose.** A value that still equals one of our own earlier factory defaults is not a choice — it follows the current default (the `LEGACY_VALUES` bullet below). Everything else on disk wins. A field the user *did* pick is his even when the value coincides with a preset: `choices` (`client.js:2531`) records those picks and the preset rule reads it before rewriting anything.
 
 How that is guaranteed:
 
 - **Defaults only fill gaps**; anything on disk wins. `sanitizeSettings()` starts from the defaults and then, field by field, keeps any valid stored value — so changing `CATEGORY_ORDER` or `defaultGlyph()` is invisible to existing users.
-- **Factory presets are ours, not the user's.** A stored value that only ever equalled a default an earlier release shipped — `💤` for the idle glyph, `blink` / `none` motion, `motionTarget: 'glyph'`, frequency `1`, sound off — follows the current default, so an existing install does eventually see the ice cube and the 4.6.3 motion table without the user re-doing anything. The table is `LEGACY_VALUES` (`client.js:214`); the same boundary already used for a category `order` that equals a historical default (`LEGACY_DEFAULTS`). As soon as the user edits that field the value is theirs and we never touch it again, and a value nobody ever shipped as a default is kept byte for byte. "Edited" is recorded explicitly: `choices` `{ "<path>": true }` (`client.js:1024-1065`) is written by `writeSettings()` from the incoming patch only, so a value the preset rule rewrote can never pass for a choice; `resetSettings()` clears the whole map because a reset is a fresh acceptance of the presets.
+- **Factory presets are ours, not the user's.** A stored value that only ever equalled a default an earlier release shipped — `💤` for the idle glyph, `blink` / `none` motion, `motionTarget: 'glyph'`, frequency `1`, sound off — follows the current default, so an existing install does eventually see the ice cube and the 4.6.3 motion table without the user re-doing anything. The table is `LEGACY_VALUES` (`client.js:214`); the same boundary already used for a category `order` that equals a historical default (`LEGACY_DEFAULTS`). As soon as the user edits that field the value is theirs and we never touch it again, and a value nobody ever shipped as a default is kept byte for byte. "Edited" is recorded explicitly: `choices` `{ "<path>": true }` (`client.js:1537-1578`) is written by `writeSettings()` from the incoming patch only, so a value the preset rule rewrote can never pass for a choice; `resetSettings()` clears the whole map because a reset is a fresh acceptance of the presets.
 - **Adding a field:** a fallback in `sanitize*` is enough, **do not bump `SETTINGS_VERSION`**. A version bump claims “a migration is required”, and a wrong migration silently wipes user data — no structural change, no version change.
 - **Real structural changes** (dropping a field, changing its meaning) must keep the chain “read old → convert → drop the old field” (today that lives in `sanitizeSettings()`; the v3.1 → v4 migration went through it) and bump `SETTINGS_VERSION` by the smallest step. The `migrate v3 to v4` test group is the acceptance test for that chain.
 
@@ -808,7 +844,7 @@ The same ground as the pitfall list at the bottom of this file, in checklist for
 ```powershell
 node --check client.js          # syntax. client.js lives inside a module loader, so a syntax error only explodes when the real page boots
 node --check index.js
-node test/classify.test.mjs     # expect a final line: PASS — 115 groups
+node test/classify.test.mjs     # expect a final line: PASS — 121 groups
 ```
 
 Plus a **static gate before saving**, available on the maintainer's machine only (not shipped with the repo):
@@ -824,7 +860,7 @@ cd <the directory you cloned into>
 
 node --check client.js          # client.js lives inside a module loader, so a syntax error only explodes when the real page boots
 node --check index.js
-node test/classify.test.mjs     # expect a final line: PASS — 115 groups
+node test/classify.test.mjs     # expect a final line: PASS — 121 groups
 ```
 
 The unit tests read the real `client.js` source, wrap it in a stub `window.__ModuleLoader__` and run it: the fake browser is hand-written (`window` / `document`, no jsdom, `React` is a stub too), the code under test is the real source. They also include a few static scans: undeclared constants, CSS selector legality, and “shortcut labels must be thunks”.
@@ -839,7 +875,7 @@ index.js               host side: registers the /hotlist-sound, /hotlist-ring an
 cordis.patch.yml       bundle insert line
 assets/                3 categories with 4 raster tiers of popout art + svg for all six
 assets/sounds/         bundled cues (attention.wav / complete.wav)
-test/classify.test.mjs unit tests (115 groups)
+test/classify.test.mjs unit tests (121 groups)
 docs/                  architecture, testing, extending
 tools/attn-ring/       super-reminder script (PowerShell + WPF; ships in the package)
 tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell; ships in the package)
@@ -850,7 +886,7 @@ tools/meru-tts/        TTS helper (generates cues; not part of the running plugi
 
 Eleven things that have already cost real debugging time — including a broken release. Each one says what happens if you ignore it.
 
-1. **Callbacks handed to the host must be thunks, not values.** The host calls `command.label()` itself inside `refreshLabels()` (`dsh-client-shortcuts/lib/client.js:1190`). Pass a string and you get `TypeError: command.label is not a function`, which takes `uiWorkspace` down with it: **the whole Web UI boots to `Failed to load plugins` with roughly twenty plugin entries stuck pending.** That is exactly how v4.3.0 shipped broken. The settings section's `label: () => t('settings.nav')` (`client.js:5315`) is a thunk for the same reason. The unit test cannot catch it because the stubbed `shortcuts` service never invokes `label()` — **if the host will call a callback you pass in, make the stub actually call it.**
+1. **Callbacks handed to the host must be thunks, not values.** The host calls `command.label()` itself inside `refreshLabels()` (`dsh-client-shortcuts/lib/client.js:1190`). Pass a string and you get `TypeError: command.label is not a function`, which takes `uiWorkspace` down with it: **the whole Web UI boots to `Failed to load plugins` with roughly twenty plugin entries stuck pending.** That is exactly how v4.3.0 shipped broken. The settings section's `label: () => t('settings.nav')` (`client.js:6039`) is a thunk for the same reason. The unit test cannot catch it because the stubbed `shortcuts` service never invokes `label()` — **if the host will call a callback you pass in, make the stub actually call it.**
    *If you ignore it:* the plugin does not just fail to work, it prevents the entire page from loading.
 
 2. **Package name, module id and bundle entry must all be the same string.** `package.json`'s `name` = the `id` in `window.__ModuleLoader__.load({ id })` = the entry recorded in the profile's `dsh.profile.bundles`.
@@ -862,7 +898,7 @@ Eleven things that have already cost real debugging time — including a broken 
 4. **The static routes this plugin registers are unauthenticated.** `/hotlist-sound/*` and `/plugins/**/assets/*` do not check a token — anyone who can reach the port can fetch them.
    *If you ignore it:* you publish a path that leaks whatever you put behind it. Public assets only, never user data.
 
-5. **User settings may never be overwritten.** `sanitizeSettings()` (`client.js:1209`) is pure and falls back **per field, never wholesale**; unknown keys are parked in `PRESERVED_KEY` (`client.js:169`) and come back on the next read; out-of-range values are recorded (`outOfRangeOf`, `client.js:1713`) and restored; the last five writes live in a rolling backup ring (`BACKUP_KEY`, `client.js:171`, `BACKUP_LIMIT = 5`). Never rebuild the settings object from `defaultSettings()` inside a migration — that silently wipes every custom value the user has.
+5. **User settings may never be overwritten.** `sanitizeSettings()` (`client.js:1741`) is pure and falls back **per field, never wholesale**; unknown keys are parked in `PRESERVED_KEY` (`client.js:169`) and come back on the next read; out-of-range values are recorded (`outOfRangeOf`, `client.js:2256`) and restored; the last five writes live in a rolling backup ring (`BACKUP_KEY`, `client.js:171`, `BACKUP_LIMIT = 5`). Never rebuild the settings object from `defaultSettings()` inside a migration — that silently wipes every custom value the user has.
    *If you ignore it:* a user loses their whole configuration and cannot tell when it happened. Recovery is only `window.__HOTLIST__.settings.backups()` / `.restore(i)`.
 
 6. **Only bump `SETTINGS_VERSION` when the data structure really changed — and then write the migration in the same commit.** Cosmetic defaults and new optional fields need a fallback in `sanitize*`, not a version bump.
@@ -871,10 +907,10 @@ Eleven things that have already cost real debugging time — including a broken 
 7. **A `client.js` change needs a page refresh; everything else needs a GUI restart.** `index.js`, `package.json` and `cordis.patch.yml` are read at host start-up (the `/hotlist-sound` route is created there). Loaded client modules are not hot-replaced either.
    *If you ignore it:* you debug stale code and conclude the change did nothing.
 
-8. **Three hard caps are hard-coded, not settings.** `PLAN_MAX_ROWS = 37` (`client.js:297`) trims from the tail so the priority head always survives; `MOTION_CONCURRENCY = 4` (`client.js:310`) limits simultaneous animation; `PINNED_SEATS = {min: 0, max: 12}` (`client.js:294`).
+8. **Three hard caps are hard-coded, not settings.** `PLAN_MAX_ROWS = 37` (`client.js:312`) trims from the tail so the priority head always survives; `MOTION_CONCURRENCY = 4` (`client.js:325`) limits simultaneous animation; `PINNED_SEATS = {min: 0, max: 12}` (`client.js:309`).
    *If you ignore it:* you "fix" a truncated plan by raising `maxSeats`, which cannot exceed the row cap.
 
-9. **There is exactly one source of truth for priority, and it is two functions.** `classify()` (`client.js:2103-2161`) decides tab seats and popouts; `sidebarStateOf()` (`client.js:2976-3012`) decides the sidebar glyph. They share the order `error > pending > completed > running > pinned > idle` but apply different extra conditions.
+9. **There is exactly one source of truth for priority, and it is two functions.** `classify()` (`client.js:2646-2704`) decides tab seats and popouts; `sidebarStateOf()` (`client.js:3519-3555`) decides the sidebar glyph. They share the order `error > pending > completed > running > pinned > idle` but apply different extra conditions.
    *If you ignore it:* you edit one and the same session shows two different states on two surfaces — that was a real bug before 4.6.0.
 
 10. **`dsh plugin add` on an already-installed plugin does not rewrite the bundle entry, and a running GUI holds the files open.** Remove first, then add; and close that profile's GUI before installing over it, otherwise the copy fails with `EPERM`.

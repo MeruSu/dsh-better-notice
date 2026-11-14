@@ -20,9 +20,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, unlinkSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,6 +55,41 @@ const AUDIO_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "tools", "aud
 
 /** How long one probe result stays usable before the script runs again. */
 const AUDIO_TTL_MS = 60 * 1000;
+
+/** Route that answers what the device-list file says. Served by the same prefix. */
+const AUDIO_CONFIG_ROUTE = "/hotlist-audio/config";
+
+/** The enumerator a user's own AI is told to run; ships in the package. */
+const AUDIO_DEVICES_SCRIPT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "tools",
+  "audio-endpoint",
+  "audio-devices.ps1",
+);
+
+/**
+ * Where the host would look for the list file. This is the only place the path
+ * is built: the client never joins a path, it only echoes what this returns.
+ * Same precedence as `@deepseek-ai/dsh-home-paths`: an explicit `DSH_HOME`
+ * wins, a blank one counts as unset, and `~/.dsh` is the fallback.
+ */
+function dshHomeDir() {
+  const configured = process.env.DSH_HOME;
+  if (configured !== undefined && configured.trim().length > 0) return configured.trim();
+  return join(homedir(), ".dsh");
+}
+
+function audioConfigFile() {
+  return join(dshHomeDir(), "hotlist-audio.json");
+}
+
+/** Last parsed list file: cached by mtime, re-read on every mtime change. */
+let audioConfigCache = { mtime: null, payload: null };
+
+/** Direction aliases an AI may write; anything unknown counts as playback. */
+const RENDER_ALIASES = ["render", "playback", "output", "输出", "播放"];
+const CAPTURE_ALIASES = ["capture", "record", "input", "输入", "录制"];
+const AUDIO_DEVICE_GROUPS = ["headphones", "speakers", "capture", "other"];
 
 /** One ring per this window: a burst of state changes must not stack processes. */
 const RING_COOLDOWN_MS = 2500;
@@ -291,6 +326,149 @@ function unknownAudioPayload(reason) {
   };
 }
 
+/** Map whatever was written into one of the two directions the gate understands. */
+function normalizeDirection(value) {
+  if (typeof value !== "string") return "render";
+  const lowered = value.trim().toLowerCase();
+  if (CAPTURE_ALIASES.includes(lowered)) return "capture";
+  if (RENDER_ALIASES.includes(lowered)) return "render";
+  return "render";
+}
+
+/** A group outside the four known ones is `other`: never guessed into headphones. */
+function normalizeGroup(value) {
+  if (typeof value !== "string") return "other";
+  const lowered = value.trim().toLowerCase();
+  return AUDIO_DEVICE_GROUPS.includes(lowered) ? lowered : "other";
+}
+
+/** One row of the file, or `null` when the row cannot name a device. */
+function normalizeAudioDevice(entry) {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+  if (typeof entry.name !== "string" || entry.name.trim() === "") return null;
+  return {
+    name: entry.name,
+    direction: normalizeDirection(entry.direction),
+    group: normalizeGroup(entry.group),
+    kindGuess: typeof entry.kindGuess === "string" ? entry.kindGuess : "unknown",
+    guess: entry.guess === true,
+  };
+}
+
+/**
+ * Read the list file. Eight tolerance rules, none of which may throw:
+ * missing file, UTF-8 BOM, unparsable JSON, wrong `version`, non-array
+ * `devices`, a single object instead of an array, an unusable row, and
+ * unknown direction/group spellings. Everything except a real runtime error
+ * answers `ok: true`, so the client never has to treat "bad file" as "host down".
+ */
+function readAudioConfig() {
+  const path = audioConfigFile();
+  let exists = false;
+  let mtime = null;
+  try {
+    const info = statSync(path);
+    exists = true;
+    mtime = Number(info.mtimeMs);
+  } catch {
+    exists = false;
+  }
+  if (exists === false) {
+    audioConfigCache = { mtime: null, payload: null };
+    return { exists: false, valid: false, reason: "missing" };
+  }
+  if (audioConfigCache.mtime === mtime && audioConfigCache.payload !== null) {
+    return audioConfigCache.payload;
+  }
+  let parsed = null;
+  let error = null;
+  try {
+    const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    parsed = JSON.parse(raw);
+  } catch (thrown) {
+    error = thrown instanceof Error ? String(thrown.message).split(/\r?\n/)[0].slice(0, 200) : "unreadable";
+  }
+  const base = { exists: true, path, directory: dirname(path) };
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    const payload = { ...base, valid: false, reason: "invalid", error: error ?? "not an object" };
+    audioConfigCache = { mtime, payload };
+    return payload;
+  }
+  if (parsed.version !== 1) {
+    const payload = { ...base, valid: false, reason: "invalid", error: error ?? `unsupported version: ${String(parsed.version)}` };
+    audioConfigCache = { mtime, payload };
+    return payload;
+  }
+  let rows = parsed.devices;
+  if (rows !== null && typeof rows === "object" && Array.isArray(rows) === false) rows = [rows];
+  if (Array.isArray(rows) === false) {
+    const payload = { ...base, valid: false, reason: "invalid", error: "devices is not an array" };
+    audioConfigCache = { mtime, payload };
+    return payload;
+  }
+  const devices = rows.map(normalizeAudioDevice).filter((device) => device !== null);
+  const headphones = devices.filter((device) => device.direction === "render" && device.group === "headphones");
+  const payload = {
+    ...base,
+    valid: true,
+    updatedAt: Number.isFinite(Number(parsed.updatedAt)) ? Number(parsed.updatedAt) : null,
+    devices,
+    deviceCount: devices.length,
+    headphoneCount: headphones.length,
+    guessCount: devices.filter((device) => device.guess === true).length,
+  };
+  audioConfigCache = { mtime, payload };
+  return payload;
+}
+
+/** One answer about the list file. A read failure is still `ok: true`, with `hostDown`. */
+function serveAudioConfig(request) {
+  try {
+    if (request.headers.get("x-hotlist-audio") !== "1") {
+      return Response.json({ ok: false, reason: "no-marker" }, { status: 403 });
+    }
+    const read = readAudioConfig();
+    const script = existsSync(AUDIO_DEVICES_SCRIPT) ? AUDIO_DEVICES_SCRIPT : null;
+    return Response.json({
+      ok: true,
+      exists: read.exists === true,
+      valid: read.valid === true,
+      path: audioConfigFile(),
+      directory: dirname(audioConfigFile()),
+      script,
+      platform: process.platform,
+      updatedAt: read.updatedAt ?? null,
+      deviceCount: read.deviceCount ?? 0,
+      headphoneCount: read.headphoneCount ?? 0,
+      guessCount: read.guessCount ?? 0,
+      devices: Array.isArray(read.devices) ? read.devices : [],
+      ...(read.reason === undefined ? {} : { reason: read.reason }),
+      ...(read.error === undefined ? {} : { error: read.error }),
+    });
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.debug("[hotlist] audio config request failed", message);
+    return Response.json({ ok: false, reason: "error", error: message }, { status: 500 });
+  }
+}
+
+/**
+ * One audio prefix, two answers: `/hotlist-audio` is the endpoint probe and
+ * `/hotlist-audio/config` is the device list. Dispatch by pathname instead of
+ * registering a second prefix, so the router's prefix ordering cannot decide
+ * which handler a request reaches.
+ */
+function serveAudioRequest(request) {
+  let pathname = "";
+  try {
+    pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+  } catch {
+    pathname = "";
+  }
+  if (pathname === `${AUDIO_ROUTE}/config`) return serveAudioConfig(request);
+  return serveAudio(request);
+}
+
 /** One audio probe request. A fresh cache answers instantly; otherwise a background run starts. */
 function serveAudio(request) {
   try {
@@ -340,11 +518,11 @@ function apply(ctx) {
         webCtx.webServer.register({
           kind: "prefix",
           path: AUDIO_ROUTE,
-          resource: (request) => serveAudio(request),
+          resource: (request) => serveAudioRequest(request),
         }),
       "hotlist: audio endpoint probe",
     );
   });
 }
 
-export { apply, AUDIO_ROUTE, AUDIO_SCRIPT, RING_ANIMS, RING_GIF_CATEGORIES, RING_ROUTE, RING_SCRIPT, RING_SCOPES, SOUND_ROUTE, ringArgs, ringCommand, serveAudio, serveRing, spawnAudioProbe, spawnRing };
+export { apply, AUDIO_CONFIG_ROUTE, AUDIO_DEVICES_SCRIPT, AUDIO_ROUTE, AUDIO_SCRIPT, dshHomeDir, normalizeAudioDevice, normalizeDirection, normalizeGroup, readAudioConfig, serveAudioConfig, serveAudioRequest, RING_ANIMS, RING_GIF_CATEGORIES, RING_ROUTE, RING_SCRIPT, RING_SCOPES, SOUND_ROUTE, ringArgs, ringCommand, serveAudio, serveRing, spawnAudioProbe, spawnRing };
