@@ -1,33 +1,82 @@
-# attn-ring — 全屏一次性提醒光圈
+# attn-ring — 全屏一次性提醒
 
-在显示器最上层显示一个琥珀色圆环光圈，默认 4 秒后自动消失。独立 PowerShell 程序，**不是 DSH 插件**，不装不发布，任何会话/任何工作区可调用。
+在显示器最上层显示一次提醒，默认 4 秒后自动消失。两种样子：**透明动画**（默认，`-Anim Gif`，画面里的人物在动）或**琥珀色圆环光圈**（`-Anim Expand` / `Breathe` / `None`）。独立 PowerShell 程序，**不是 DSH 插件**，不装不发布，任何会话/任何工作区可调用。
 
 ## 用法（直接复制粘贴）
 
+包内路径：下面的 `<包安装路径>` 指 `node_modules\dsh-better-notice`（npm 装完后的位置），或你 clone 仓库后的仓库根。
+同目录的 `ring.cmd` 双击就能跑，不用写路径。
+
 ```powershell
-pwsh -NoProfile -File C:\Meru\Seek\tools\attn-ring\Show-AttnRing.ps1
+pwsh -NoProfile -File <包安装路径>\tools\attn-ring\Show-AttnRing.ps1
 ```
 
-**默认行为**（不带任何参数）：显示 **4 秒** / **主屏** / **展开动画**（环从中心放大浮现），到时自动淡出关闭。无需管理员权限，不装任何东西。
+**默认行为**（不带任何参数）：显示 **4 秒** / **主屏** / **透明动画**（`Gif`，见下），到时自动淡出关闭。无需管理员权限，不装任何东西。
 
-### 三个参数
+### 参数
 
 | 参数 | 取值 | 默认 | 说明 |
 |---|---|---|---|
 | `-Seconds` | 1–30（整数） | `4` | 显示时长，到时自动关 |
 | `-Scope` | `Primary` \| `All` | `Primary` | 只在主屏显示 / 每块显示器各显示一个 |
-| `-Anim` | `Expand` \| `Breathe` \| `None` | `Expand` | 展开浮现 / 呼吸明暗 / 静态不动 |
+| `-Anim` | `Gif` \| `Expand` \| `Breathe` \| `None` | `Gif` | 透明动画 / 展开浮现 / 呼吸明暗 / 静态不动 |
+| `-GifCategory` | `error` \| `pending` \| `completed` | `pending` | 只在 `-Anim Gif` 时有效：挑哪一段动画 |
 
-例：全屏呼吸 8 秒——
+例：全屏播「完成」那段动画 8 秒——
 
 ```powershell
-pwsh -NoProfile -File C:\Meru\Seek\tools\attn-ring\Show-AttnRing.ps1 -Seconds 8 -Scope All -Anim Breathe
+pwsh -NoProfile -File <包安装路径>\tools\attn-ring\Show-AttnRing.ps1 -Seconds 8 -Anim Gif -GifCategory completed
 ```
+
+例：回到琥珀环呼吸 8 秒——
+
+```powershell
+pwsh -NoProfile -File <包安装路径>\tools\attn-ring\Show-AttnRing.ps1 -Seconds 8 -Scope All -Anim Breathe
+```
+
+### 三段动画（`media/`）
+
+| `-GifCategory` | 文件 | 帧 | 字节 | 画面 |
+|---|---|---|---|---|
+| `error` | `media/smack.gif` | 10（母版全帧） | 375,625 | 拍击 |
+| `pending` | `media/smack.gif` | 10（母版全帧） | 375,625 | 拍击 |
+| `completed` | `media/wave.gif` | 11（母版第 22–32 帧） | 404,081 | 打招呼 |
+
+- 320×320、`GIF89a`、每帧 30 ms、无限循环，**角像素真透明**（不是白底也不是暗底）——所以人物直接叠在正文上，能看到背后的字。
+- 母版是两张 500×500 素材（拍击 10 帧 / 打招呼 66 帧）。**母版不在仓库里**——随包发布的只有 `media/` 里的两张成品 GIF；想重建的人要自己准备同尺寸素材，**作为两个参数传进去**（脚本里不存任何路径，参数缺失会打印用法并以非零退出）：`python <包安装路径>\tools\attn-ring\build-media.py <smack.gif> <wave.gif>`。脚本用 Pillow 重采样到 320 并重新量化，**不依赖任何第三方运行时**；裁哪一段由 `WAVE_SLICE` 常量决定，改帧范围才需要动它。
+- **编码坑（改脚本前必读）**：RGBA 直接 `convert('P', palette=ADAPTIVE)` 再 `transparency=0` 会把某个**真实颜色**分到调色板 slot 0，人物身上会被打出一片洞。正确做法是把 slot 0 留给透明键、图画量化到 slot 1..N-1 后整体 +1，再用 alpha=0 的 mask 写回 0。
+- `media/<cat>.gif` 缺失或解码失败 → **自动退回 `Expand`**（琥珀环）并在 stderr 写一行；不会静默什么都不显示。`Expand` / `Breathe` / `None` 三条老路径的绘制代码一个字节都没动。
+
+### 重建动画：shift 必须是 i→i+1，改完必须逐点比像素
+
+5.2.0 那一版在这里翻过车，症状很隐蔽：GIF 结构、帧数、**文件字节数全都正确**，只有颜色错。改 `build-media.py` 前把这三条看完。
+
+1. **调色板 slot 0 是透明键，所以 `trimmed` 的索引要整体 +1。** 外面那张 `palette` 是 `[0,0,0] + trimmed.getpalette()[:3*(COLORS-1)]`——`trimmed` 的索引 `0..COLORS-2` 对应外部调色板的 `1..COLORS-1`。shift 表写成 `i-1`（off-by-one）会让每个像素取到**相邻**那一个颜色：头发／头饰上出现红粉噪点、红色按钮发暗成藏蓝、腮红变成蓝泪痕——整张图「看着还行、颜色全错」。正确写法：
+
+   ```python
+   shift = [0] * 256
+   for index in range(COLORS - 1):
+       shift[index] = index + 1
+   for index in range(COLORS - 1, 256):
+       shift[index] = COLORS - 1
+   ```
+
+2. **不能只看文件大小。** 坏版与好版字节数**完全相同**（`smack.gif` 都是 375,625 B、`wave.gif` 都是 404,081 B），因为改的只有调色板索引，帧数、结构与压缩后长度都没变。`Get-Item.Length` 相等不证明颜色对。
+3. **必须逐点比原图。** 把成品重采样回母版尺寸，在若干已知位置采样对比，误差应落在量化噪声内（个位数到十几）；出现 **>40 的通道差**就是 shift 又错了。可直接复制（`$master` 换成对应母版）：
+
+   ```powershell
+   $py = '<装着 Pillow 的 python 可执行文件，例如 C:\Python312\python.exe>'
+   $master = '<你自己那份母版 GIF 的完整路径>'
+   & $py -c "from PIL import Image; import sys; a=Image.open(sys.argv[1]).convert('RGBA'); b=Image.open(sys.argv[2]).convert('RGBA').resize(a.size); [print(p, a.getpixel(p), b.getpixel(p)) for p in [(160,60),(200,150),(80,40),(240,260)]]" tools/attn-ring/media/smack.gif $master
+   ```
+
+   参考实测值（修好后）：`(160,60)` 原图 `(108,142,186)` / 成品 `(110,132,183)`，`(200,150)` 原图 `(253,235,237)` / 成品 `(253,234,236)`。
+
 
 ### 怎么关（三种，任选）
 
 - **等**：到 `-Seconds` 自动关（默认 4 秒）；
-- **点一下**：鼠标左键点光圈 → 立即关。**这一击被光圈吞掉，不会传给下层窗口**（语义就是"点我一下让我走"，代价是你那一击点不到后面的按钮）；
+- **点一下**：鼠标左键点屏幕任意处 → 立即关。**这一击被提醒窗口吞掉，不会传给下层**（语义就是"点我一下让我走"，代价是你那一击点不到后面的按钮）。透明动画那档没有暗底，人物之外的地方也是这块窗口，所以同样是"点哪儿都关、都吞一下"——和琥珀环时期一致，别以为下层应用卡住了。
 - **按 Esc**：立即关。Esc 只被**观察**（40ms 轮询 `GetAsyncKeyState`），**不拦截、不吞键**——按 Esc 时你正在用的其它程序也收不到这个 Esc，等价于"看了眼键盘"。
 
 关闭后进程退出，**无托盘图标、无残留进程**（stdout 输出 `done` 行，含 `closeReason`：`timeout` / `click` / `esc`）。
@@ -66,8 +115,10 @@ pwsh -NoProfile -File C:\Meru\Seek\tools\attn-ring\Show-AttnRing.ps1 -Seconds 8 
 3. **Esc 实现是 40ms 轮询 `GetAsyncKeyState(0x1B)`，不是低级键盘钩子**——比钩子更弱干扰（完全不拦截键盘），代价是理论上有 ≤40ms 检测延迟，实测无感。
 4. **点击语义 = 吞点击**：点光圈那一击不传下层窗口（R4 拍板语义）。
 5. **启动延迟 2.3–3.0 秒**（见上）。
-6. **`-Color/-Thickness/-OverlayAlpha/-RadiusPx/-ReassertMs/-Quiet` 参数保留但未实现**——传了会输出 warning 提示「计划中」，不影响显示。**计划中**清单：`-RequirePresent` + `-Seconds 0`（成对）、上述视觉参数、`-Image`（自定义 GIF，方案待拍板）。
+6. **`-Color/-Thickness/-OverlayAlpha/-RadiusPx/-ReassertMs/-Quiet` 参数保留但未实现**——传了会输出 warning 提示「计划中」，不影响显示。**计划中**清单：`-RequirePresent` + `-Seconds 0`（成对）、上述视觉参数、`-Image`（任意自定义 GIF；现在只认 `-Anim Gif -GifCategory` 的三段内置动画）。
 7. **DPI**：三级 fallback（进程级 PM_V2 → 线程级 PM_V2 → `GetDpiForMonitor`），本机实测第一级即成功（`dpiPath=process-PM_V2`）；混合 DPI 双屏（120/96）各显示一环已验证（R3 PASS，像素量圆两屏均 `|w−h|=0` 且居中）。
+8. **透明动画只有 320 px 母版**：`media/*.gif` 是 320×320，显示时按屏高 1/3（上限 340 DIP）**放大**，4K 屏上会略糊；没有再往上做是因为 400 px 且透明正确时两个文件约 1.4 MB，会把插件包撑大一倍（详见 `build-media.py` 顶部注释的实测数字）。
+9. **动画素材缺失 → 退回琥珀环**：`media/<cat>.gif` 不在或被解码器拒（非 GIF89a、帧数为 0）时会 `stderr` 记一行并改用 `Expand`，不静默消失；但这也意味着**误删 media 目录不会报错，只会变回旧样子**。
 
 ## 验证记录（2026-11-13，全部本机实测）
 

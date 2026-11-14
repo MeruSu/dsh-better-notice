@@ -1,7 +1,7 @@
 // test/classify.test.mjs — runs the real client.js in Node against stubs.
 // Covers the settings seam, the pure seat-plan builder, and the tab-row adapter.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -4074,6 +4074,73 @@ test('pills carry the class animation', () => {
   }
 });
 
+// 90b. The band animates while it just sits there; a burst is the same motion, played once.
+test('pills keep their class animation, and a burst plays it once', () => {
+  /** The band injects its own stylesheet; read what it actually put in the document. */
+  const chipStyleText = () => {
+    const nodes = globalThis.document.head.children.filter(
+      (child) => child.attributes !== undefined && child.attributes.has('data-hotlist-chip-style'),
+    );
+    return nodes.length === 0 ? '' : nodes[nodes.length - 1].textContent;
+  };
+  const ids = ['sit-ask'];
+  const byId = { 'sit-ask': session({ id: 'sit-ask', displayTitle: '等审批' }) };
+  enableTopbar();
+  // Frequency 0 means the band never rolls a hit, so "at rest" is deterministic here.
+  api.writeSettings({
+    categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, frequency: 0 } } },
+  });
+  const harness = createCtx({
+    list: { ids, byId },
+    statuses: new Map([['sit-ask', { pendingInteraction: { kind: 'approval' } }]]),
+    groups: { items: [{ workspaceId: 'w', sessionIds: ids }], archivedSessionIds: [] },
+  });
+  api.apply(harness.ctx, {});
+  try {
+    const css = chipStyleText();
+    assert.notEqual(css, '', 'the band injects a stylesheet of its own');
+    assert.ok(
+      css.includes('[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out infinite}'),
+      'the title animates for as long as the pill is on screen',
+    );
+    assert.ok(
+      css.includes('[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out 1}'),
+      'a burst is the same animation, played once',
+    );
+    for (const motion of ['spin', 'pulse', 'bounce', 'blink']) {
+      const timing = motion === 'spin' ? '2.4s linear' : motion === 'pulse' ? '1.6s ease-in-out' : '1.2s ease-in-out';
+      const scale = motion === 'blink' ? '' : ';will-change:transform';
+      assert.ok(
+        css.includes(`[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-emoji]{animation:hl-${motion} ${timing} infinite${scale}}`),
+        `a glyph with ${motion} animates without waiting for a burst`,
+      );
+      assert.ok(
+        css.includes(`[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-title]{animation:hl-text-${motion} ${timing} infinite}`),
+        `a title with ${motion} has an always-on rule too`,
+      );
+      assert.ok(css.includes(`@keyframes hl-text-${motion}`), `the band carries the hl-text-${motion} keyframe it references`);
+    }
+    assert.equal(css.includes('hl-chip-nudge'), false, 'the band no longer nudges the whole pill');
+    assert.ok(css.includes('[data-hotlist-chip] *{animation:none !important}'), 'reduced motion reaches the glyph and the title');
+
+    const pill = () =>
+      collect(harness.entries.get(api.TOPBAR_ID).Component({}), (props) => typeof props['data-hotlist-chip'] === 'string')[0];
+    const resting = pill();
+    assert.equal(resting.props['data-hotlist-chip-motion'], 'bounce', 'the class motion is declared at rest');
+    assert.equal(resting.props['data-hotlist-chip-target'], 'row', 'so is the target, before any burst happens');
+    assert.equal(resting.props['data-hotlist-chip-burst'], undefined, 'nothing is bursting at rest');
+    api.writeSettings({
+      categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, motion: 'blink', motionTarget: 'glyph' } } },
+    });
+    const switched = pill();
+    assert.equal(switched.props['data-hotlist-chip-motion'], 'blink', 'the new motion is picked up');
+    assert.equal(switched.props['data-hotlist-chip-target'], 'emoji', 'a glyph target is declared just as early');
+  } finally {
+    harness.cleanup();
+    api.resetSettings();
+  }
+});
+
 // 91. A tab seat gets the same glyph, one emoji, never two.
 test('tab seats draw the same glyph and motion', () => {
   tabRow.children.length = 0;
@@ -4435,8 +4502,8 @@ test('ring player: off by default, one ring per entry when switched on', () => {
   assert.equal(requests.length, 1, 'the same session in the same class is a repaint');
   assert.deepEqual(
     requests[0],
-    { category: 'pending', seconds: 4, scope: 'Primary', anim: 'Expand' },
-    'the request carries the three implemented script arguments',
+    { category: 'pending', seconds: 4, scope: 'Primary', anim: 'Gif' },
+    'the request asks for a clip, not the amber ring',
   );
 
   /** A cold player arms before it rings: the first sync after launch is never a reason to interrupt. */
@@ -4473,7 +4540,7 @@ await testAsync('host ring: script arguments and no-pwsh safety', async () => {
   const host = await import(new URL('./../index.js', import.meta.url).href);
 
   const clamped = host.ringArgs(new URLSearchParams('seconds=99999&scope=Bogus&anim=Breathe'));
-  assert.deepEqual(clamped, { seconds: 30, scope: 'Primary', anim: 'Breathe' }, 'seconds clamp, unknown scope falls back');
+  assert.deepEqual(clamped, { seconds: 30, scope: 'Primary', anim: 'Breathe', gifCategory: null }, 'seconds clamp, unknown scope falls back');
   const low = host.ringArgs(new URLSearchParams('seconds=0'));
   assert.equal(low.seconds, 1, 'the floor holds');
 
@@ -4555,6 +4622,102 @@ await testAsync('host ring: script arguments and no-pwsh safety', async () => {
   assert.equal(pkg.files.includes('tools'), false, 'the rest of tools/ stays out of the package');
   assert.equal(pkg.exports['./tools'], undefined, 'the script is read from disk, not imported through exports');
   assert.equal(existsSync(host.RING_SCRIPT), true, `the host resolves ${host.RING_SCRIPT}`);
+});
+
+/**
+ * The super reminder: the transparent clips that stand in for the amber ring, and
+ * the popout artwork that had to go back to its static set.
+ *
+ * Three assertions here are load-bearing:
+ *  - the popout manifest is the pre-GIF one again (`total_webp_bytes` 681462, and
+ *    every file on disk matches the byte count the manifest claims),
+ *  - both clips exist with the frame count the animation relies on (counted by
+ *    walking the GIF block structure, because LZW data can contain the same byte
+ *    pair a naive scan would look for),
+ *  - a `Gif` ring reaches the script as `-Anim Gif -GifCategory <cat>`, while a
+ *    stray `cat` on the amber ring is ignored rather than reinterpreted.
+ */
+function gifFrames(bytes) {
+  let at = 6;
+  const flags = bytes[at + 4];
+  at += 7;
+  if (flags & 0x80) at += 3 * (1 << ((flags & 0x07) + 1));
+  let images = 0;
+  const skipBlocks = () => {
+    for (;;) {
+      const size = bytes[at];
+      at += 1;
+      if (size === 0) return;
+      at += size;
+    }
+  };
+  while (at < bytes.length) {
+    const marker = bytes[at];
+    at += 1;
+    if (marker === 0x3b) break;
+    if (marker === 0x21) {
+      at += 1; // extension label
+      skipBlocks();
+      continue;
+    }
+    if (marker !== 0x2c) throw new Error(`unexpected GIF block 0x${marker.toString(16)} at ${at - 1}`);
+    const local = bytes[at + 8];
+    at += 9;
+    if (local & 0x80) at += 3 * (1 << ((local & 0x07) + 1));
+    at += 1; // LZW minimum code size
+    skipBlocks();
+    images += 1;
+  }
+  return images;
+}
+
+test('the super reminder ships two clips, and the popout art is back to static', () => {
+  const assetsDir = join(HERE, '..', 'assets');
+  const manifest = JSON.parse(readFileSync(join(assetsDir, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.total_webp_bytes, 681462, 'the static popout set, not the animated one');
+  let summed = 0;
+  for (const category of ['error', 'pending', 'completed']) {
+    for (const tier of ['64', '320', '780', '1560']) {
+      const entry = manifest.categories[category].files[tier];
+      assert.equal(statSync(join(assetsDir, entry.file)).size, entry.bytes, `${entry.file} matches the manifest`);
+      assert.equal(entry.px, Number(tier), `${entry.file} is a static tier of its own size`);
+      summed += entry.bytes;
+    }
+  }
+  assert.equal(summed, manifest.total_webp_bytes, 'the manifest total is the sum of its tiers');
+
+  /** The clips: 320 px, 1-bit alpha, 30 ms a frame; both well under the size budget. */
+  const mediaDir = join(HERE, '..', 'tools', 'attn-ring', 'media');
+  for (const [name, frames] of [['smack.gif', 10], ['wave.gif', 11]]) {
+    const path = join(mediaDir, name);
+    assert.equal(existsSync(path), true, `${name} is bundled`);
+    const bytes = readFileSync(path);
+    assert.equal(bytes.subarray(0, 6).toString('latin1'), 'GIF89a', `${name} is a GIF`);
+    assert.equal(bytes[6] | (bytes[7] << 8), 320, `${name} is 320 px wide`);
+    assert.equal(bytes[8] | (bytes[9] << 8), 320, `${name} is 320 px tall`);
+    assert.equal(gifFrames(bytes), frames, `${name} holds ${frames} frames`);
+    assert.ok(bytes.length < 450 * 1024, `${name} stays inside the package budget (${bytes.length} B)`);
+  }
+});
+
+test('a gif ring reaches the script with its clip, and other animations stay untouched', async () => {
+  const host = await import(new URL('./../index.js', import.meta.url).href);
+  const gif = host.ringArgs(new URLSearchParams('seconds=4&anim=gif&cat=completed'));
+  assert.deepEqual(gif, { seconds: 4, scope: 'Primary', anim: 'Gif', gifCategory: 'completed' }, 'the clip survives the query');
+  const argv = host.ringCommand(gif, 'C:/x/Show-AttnRing.ps1').argv;
+  assert.equal(argv[argv.indexOf('-Anim') + 1], 'Gif');
+  assert.equal(argv[argv.indexOf('-GifCategory') + 1], 'completed', 'the script is told which clip to play');
+
+  const junkCat = host.ringArgs(new URLSearchParams('seconds=4&anim=Gif&cat=<script>'));
+  assert.equal(junkCat.gifCategory, 'pending', 'an unknown clip falls back instead of reaching the shell');
+
+  const amber = host.ringArgs(new URLSearchParams('seconds=4&anim=Expand&cat=error'));
+  assert.deepEqual(amber, { seconds: 4, scope: 'Primary', anim: 'Expand', gifCategory: null }, 'cat is ignored without gif');
+  assert.equal(host.ringCommand(amber, 'C:/x/Show-AttnRing.ps1').argv.includes('-GifCategory'), false, 'the amber ring is started exactly as before');
+  for (const name of ['Expand', 'Breathe', 'None']) {
+    assert.equal(host.RING_ANIMS.includes(name), true, `${name} keeps its slot in the whitelist`);
+  }
+  assert.equal(host.RING_GIF_CATEGORIES.join(','), 'error,pending,completed', 'only the three urgent classes have a clip');
 });
 
 console.log(`PASS — ${groups} groups`);

@@ -34,7 +34,7 @@ api.lastError()        // 最近一次写盘错误（字符串或 null）
 ```
 
 同一对象也挂在旧名 `window.__SESSION_SWITCHER_SETTINGS__`（v2.x 兼容，别在新代码里用）。
-插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.2.0'`）。
+插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.2.1'`）。
 
 写设置后不需要刷新页面：tab、侧栏、设置页都在同一个 store 上重算。
 
@@ -133,7 +133,8 @@ window.__HOTLIST__.topbar();
   sound: { volume: 60 },        // 全局音量 0–100
   pins: { '<sessionId>': 1 },   // 【v4.6.0 起废弃】置顶改读宿主原生 pinnedSessionIds，此字段不再参与判定，旧盘上读时丢弃
   pinned: { maxSeats: 3 },      // v4.6.0 新增：置顶最多占几个座位，0–12，0 = 不显示置顶
-  ring: { pending: false, error: false, completed: false },  // v5.2.0 新增：全屏光圈三开关，出厂全关；只有 Windows 有效
+  ring: { pending: false, error: false, completed: false },  // v5.2 新增：超级提醒三开关，出厂全关；只有 Windows 有效
+                                  // 默认长相是透明动画（anim=Gif，smack/wave），琥珀光环是可选档
                                 // 开了的存在 choices 里，所以出厂预设规则不会把它们关回去
   categories: { <cat>: { …见下… } },
 }
@@ -335,11 +336,13 @@ window.__HOTLIST_SETTINGS__.set({ categories: { error: { sound: now.categories.e
 window.__HOTLIST__.settings.set({ ring: { pending: true, error: false, completed: false } })
 
 // 2) 直接打宿主路由（要带 marker 头，否则 403）
-await fetch('/hotlist-ring?category=pending&seconds=4&scope=Primary&anim=Expand',
+await fetch('/hotlist-ring?cat=pending&seconds=4&scope=Primary&anim=Gif',
   { headers: { 'x-hotlist-ring': '1' } }).then(r => r.json())
-// → { ok: true, seconds: 4, scope: 'Primary', anim: 'Expand' }
+// → { ok: true, seconds: 4, scope: 'Primary', anim: 'Gif' }
 
-// 3) 只想要更长的光圈：seconds 夹在 1–30，anim 只认 Expand / Breathe / None
+// 3) 想换长相：anim 认 Gif / Expand / Breathe / None（默认 Gif）；
+//    Gif 档用 cat 挑片段（error / pending / completed，非法值按 pending），
+//    其余三档用 cat 无效。seconds 夹在 1–30。
 ```
 
 **2.5 秒冷却**：连发第二条返回 429 `{ ok: false, reason: 'cooling' }`。**没带 marker 头**返回 403 `reason: 'no-marker'`。**脚本缺失**（只装了 npm 包而包里没带 `tools/attn-ring`）返回 503 `reason: 'not-started'`，宿主日志一行 `[hotlist] ring script missing`。
@@ -370,8 +373,8 @@ await fetch('/hotlist-ring?category=pending&seconds=4&scope=Primary&anim=Expand'
   - **tab 座位** —— `conversation.view` slot（`SLOT`，`client.js:80`），`mountTabSeats()` 注册。
   - **窗口顶栏** —— `shell.overlay` slot（`TOPBAR_SLOT`，`client.js:115`），`mountTopbar()` 注册。
   - **左侧会话栏图标** —— 不占 slot，直接增强宿主 DOM（`[role="treeitem"][data-row-key^="session:"]` 行里插 `span[data-hotlist-glyph]`），`createSidebarAdapter()`。
-  - **音效 + 弹出图** —— 不占 slot：音效走宿主 web 路由 `/hotlist-sound`，弹出图由 `mountPopout()`（`client.js:4422`）append 到 `document.body`。
-  - **全屏光圈** —— 不占 slot，也不是 DOM：页面 `fetch('/hotlist-ring')` 让宿主半边起一个独立进程（`createRingPlayer` `client.js:5080` · `serveRing` `index.js:167` · `tools/attn-ring/Show-AttnRing.ps1`）。
+  - **音效 + 弹出图** —— 不占 slot：音效走宿主 web 路由 `/hotlist-sound`，弹出图由 `mountPopout()`（`client.js:4427`）append 到 `document.body`。
+  - **超级提醒** —— 不占 slot，也不是 DOM：页面 `fetch('/hotlist-ring')` 让宿主半边起一个独立进程（`createRingPlayer` `client.js:5085` · `serveRing` `index.js:167` · `tools/attn-ring/Show-AttnRing.ps1`）。
 
   加第六个面时，照上面挑一种挂法，再看 `docs/ARCHITECTURE.md` 的「扩展点」一节。
 - 改动后必须跑：`node --check client.js`、`node --check index.js`、`node --check test/classify.test.mjs`、`node test/classify.test.mjs`。四样全绿才算完。

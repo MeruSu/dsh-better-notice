@@ -9,7 +9,7 @@ cd <你的克隆目录>            # 含 client.js / index.js / test/ 的那一�
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs       # 期望最后一行: PASS — 109 groups，exit 0
+node test/classify.test.mjs       # 期望最后一行: PASS — 112 groups，exit 0
 ```
 
 `node --check` 是必须的：`client.js` 是包在 `window.__ModuleLoader__.load({factory})` 里的单文件脚本，语法错只在真机 boot 时才炸。
@@ -26,7 +26,7 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 
 `test/classify.test.mjs` 不用 import：它 stub 一个 `window.__ModuleLoader__.load` 抓住 factory，再 `new Function(source)()` 执行**真实的 client.js 源文件**，拿回模块的导出（`classify`、`sortSeats`、`buildSeatPlan`、`sanitizeSettings`、`migrateSettings`、`createSidebarAdapter`…）。所以测的是真代码，假的是浏览器环境：`document` / `localStorage` / `React` / cordis `ctx`。
 
-### 1.2 109 组各测什么
+### 1.2 112 组各测什么
 
 | 组 | 位置 | 覆盖 |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 | adapter sidebar pinned and children | `test:1194` | 侧栏看到与 tab 一样的信息：置顶会话出 📌、有子会话在跑时父会话出 ⏳ |
 | takeover gate | `test:1226` | `takeOverStatusDot:true` 时 `[data-hotlist-style="takeover"]` 恰好 1 个且 dsm 点 `display:none`；改成 `false` 后 style 块被移除、点的 inline `display` 还原成 `''` |
 | styles stay valid | `test:1257` | 所有注入的样式文本不含 `[[`（二次包裹的选择器），`stop()` 后 `[data-hotlist-style]` 一个不剩 |
-| settings page | `test:1293` | section 注册 `[['hotlist',30]]`、label「热表」、页根 `data-hotlist-settings="v5.2.0"`；全局区行键齐（`maxSeats`/`pinned.maxSeats`/`collect.completedTtlMs`/`sound.volume`/`recentWindow`/`positions.tab`/`positions.topbar`/`takeOverStatusDot`）；**6 张卡**按 order 排 `error,pending,pinned,completed,running,idle`；折叠态 **30 个 chip**（6×5，其中 6 个是 topbar 位：`data-disabled="true"` + `data-on="false"`，位置 chip 的 `title` 是 `settings.chip.positionHint`）；`hideNativeDot`/`shortcuts.*`/`reset`/`within`/`overlay.size` 五类行**不存在**；`categories.favorite` **不存在**；`window.__HOTLIST__.assets.add(...,'nope',...)` 返回 `reason:'invalid'` |
+| settings page | `test:1293` | section 注册 `[['hotlist',30]]`、label「热表」、页根 `data-hotlist-settings="v5.2.1"`；全局区行键齐（`maxSeats`/`pinned.maxSeats`/`collect.completedTtlMs`/`sound.volume`/`recentWindow`/`positions.tab`/`positions.topbar`/`takeOverStatusDot`）；**6 张卡**按 order 排 `error,pending,pinned,completed,running,idle`；折叠态 **30 个 chip**（6×5，其中 6 个是 topbar 位：`data-disabled="true"` + `data-on="false"`，位置 chip 的 `title` 是 `settings.chip.positionHint`）；`hideNativeDot`/`shortcuts.*`/`reset`/`within`/`overlay.size` 五类行**不存在**；`categories.favorite` **不存在**；`window.__HOTLIST__.assets.add(...,'nope',...)` 返回 `reason:'invalid'` |
 | settings page card order | `test:1362` | 改 `categories.error.order = 5` 后卡片顺序是 `error,pending,pinned…`（error 与 pending 同为 10，按 `CATEGORY_ORDER` 兜底），末位 `idle` |
 | settings page overflow notice | `test:1376` | v4.4 删掉了提示条：`publishOverflow`/`currentOverflow`/`onOverflowChange` 都不再导出、页面无 `[data-hotlist-overflow]`、文案里没有 `settings.overflow`；但 `plan.overflow` 的数字仍在（`limit:1` + 3 行 → `overflow===2`） |
 | settings upload gate | `test:1397` | `glyphUploadReject`：`null`→`missing`、svg→`type`、**gif 放行**、webp 5 MB→`size`；超限 data URL 在 `sanitizeSettings` 里回落 `emoji` 且 `value:''`。上传是**两道闸**：源文件大小与产物（重编码后）大小 |
@@ -126,19 +126,22 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 | the table names every seat and why the rest are out | `test:3971` | `hotlistTable()` 的 `rows` 每行带 `surfaces`（哪个面在画它）与从 1 开始的 `index`；`missing` 逐条给原因 —— 超上限 `over-cap`、该面关着 `position-off`、空会话 `empty`、子代理 `subagent`；把 idle 的三个面全关后原因变 `surface-off`；`scope:'workspace'` 时别的工作区会话原因 `scope`；`table.limit` 随行带出供标题使用 |
 | the table view is a tab of its own | `test:4025` | 看板以固定 id `TABLE_VIEW_ID` 注册、`order === TABLE_VIEW_ORDER`（排在所有座位之后）；组件渲染出一个 `data-hotlist-table` 根节点、每个热会话一行 `data-hotlist-table-row`，此处没有落选行所以 `data-hotlist-missing` 计数为 0 |
 | pills carry the class animation | `test:4051` | 顶栏胶囊带类别动效：待审批会话的胶囊有 `data-hotlist-chip-motion='bounce'`；把 `display.reduceMotion` 改成 `'on'` 后重渲染，该属性变 `undefined` —— 减动效摘掉的是胶囊上的动效，不是不画胶囊 |
-| tab seats draw the same glyph and motion | `test:4078` | 把 `categories.pinned.order` 调到 5 让会话进 tab 行后，座位按钮里长出 `data-hotlist-tab-glyph` 的 span：文本是类别图标 `📌`、`data-hotlist-motion='bounce'`；宿主原来的文本节点仍是 `会话 tab-pin` —— 图标不写进标题文字 |
-| every category offers all three positions | `test:4108` | 六类 × `tab`/`sidebar`/`topbar` 共 18 个 `categories.<类>.surfaces.<面>` 行全部存在；`idle.surfaces.tab` 初始 `checked:true`，触发 `onChange()` 后设置里变 `false`，重渲染时摘要行那颗 `tab` chip 跟着变 `data-on='false'` —— 行与 chip 读的是同一份设置 |
-| export is an API, not a button | `test:4143` | 设置页里**没有** `data-hotlist-export` 节点、也没有任何行键含 `export`；但 `window.__HOTLIST__.export` 仍然是函数，`export({format:'json'})` 返回可 `JSON.parse` 的数组 —— 导出只从控制台走 |
-| a yielded title still shows a class glyph | `test:4158` | 标题自带 `🎓` 时侧栏仍建出 `data-hotlist-glyph` 槽位：`data-hotlist-char='🎓'`（用标题那颗而不是类别图标）、`data-hotlist-glyph-kind='emoji'`（所以能挂动效）、`style.display` 不是 `none`；同时宿主标题文本里那颗 emoji 被剥掉，只剩 `大聪明` |
-| equal order falls back to the class rank | `test:4190` | `error.order` 与 `pending.order` 同为 10、同一会话既报错又待审批时，`classify()` 判成 `error` —— 平手靠类别名次（`CATEGORY_RANK`）断，不靠 Map 插入顺序 |
-| the table only reads the surfaces that are on | `test:4204` | 三个面全开时该行 `surfaces` 三项全 `true`、`missing` 为空；band 落下（`bandUp:false`）且只开 tab 时 `surfaces` 变 `{tab:true,sidebar:false,topbar:false}` 但仍有一行；三个面全关时 `rows` 为空，而该会话进 `missing` 且 `reason==='position-off'` —— 不是悄悄消失 |
-| the table keeps a foreign pin out of the pinned class | `test:4239` | `scopeWorkspaceIds:['here']` 时别的会话的置顶不算置顶：行还在，但类别落 `idle`；把它划进本工作区、`pinned.order` 仍是默认 60 时还是 `idle`（置顶默认比 idle 弱）；只有把 `pinned.order` 提到 5，本工作区的置顶才变 `pinned`，而别的工作区那颗**无论 order 多高都不赢** |
-| a slot declared later never gets registered early | `test:4265` | 宿主先声明 `shell.overlay`、后声明 `conversation.view`：`apply()` 后顶栏进它自己的槽（`hotlist.topbar` 已注册），但**没有任何 `hotlist-seat-*`、也没有 `hotlist-table`**；等到 `conversation.view` 被声明，座位与看板才注册 —— 这就是 5.0.0-alpha.1 那次 `slot "conversation.view" is not declared` 启动崩的回归位 |
-| rows left out are grouped by reason, not dumped | `test:4294` | 落选行按固定阅读顺序分组成 `['over-cap','empty','subagent']`（不是按条数排名）；每组是一个 `<details>` 且默认折叠（`open===undefined`）；三个落选会话仍然都渲染在组里、各自带原 `data-hotlist-missing` 原因；每组头部 `hl-missingGroupCount` 报该组条数（此处三个 1） |
-| the cap has no auto mode and the window default replaces the old one | `test:4343` | `maxSeats` 行只剩 `[minus, plus]` 两个 stepper、没有第二个 `aria-pressed` 控件（自动档按钮已删）；`sanitizeSettings({maxSeats:6, collect:{recentWindowMinutes:5}})` 把未标记的 5 认成旧出厂默认、升到 **17**，而经页面写过的 5 会被记成用户选择、重载后仍是 5；`maxSeats:'auto'` 仍然合法（只是没有按钮），`buildSeatPlan` 按传进来的 `limit` 截断 |
-| display metadata: the plugin list can show a name and an icon | `test:4382` | 插件列表的元数据：`package.json` 的 `icon` 指向 `./icon.svg` 且 `exports['./icon']` 与 `exports['./locale/*.json']` 都在、`files` 含 `icon.svg` 与 `locale`；`locale/{en,zh}.json` 两种语言的 `meta.title`/`meta.description` 都非空；图标以 `<svg` 开头且 ≤256 KiB（宿主上限） |
-| ring player: off by default, one ring per entry when switched on | `test:4402` | 光圈默认全关（`ring.pending/error/completed` 都是 `false`，且不是 `choices` 里的用户选择）；开了以后同一个会话只在**进入**该类的那一次升一圈（同一类连续两次 sync 只一次）；`running`/`idle` 甚至不在 `RING_CATEGORIES` 里；1500 ms 节流共享 |
-| host ring: script arguments and no-pwsh safety | `test:4472` | 宿主半边三道闸：参数夹取（`seconds` 夹到 1–30、`scope`/`anim` 白名单）、`spawn` 必须挂 `child.on('error')`（不挂会打死 host）、脚本真的在包里（`files` 含 `tools/attn-ring` 且**不含** `tools`）且在磁盘上（`RING_SCRIPT` 可解析） |
+| pills keep their class animation, and a burst plays it once | `test:4078` | 顶栏自己的样式表（`data-hotlist-chip-style`）两层都齐：静止就 `infinite`（`emoji` 目标四条 + `row` 目标四条 `hl-text-*`），带 `data-hotlist-chip-burst` 的才是 `1` 次；八条引用的 `@keyframes` 都在带内自带；`hl-chip-nudge` **已不存在**；减动效一行盖住胶囊和它的子节点 |
+| tab seats draw the same glyph and motion | `test:4145` | 把 `categories.pinned.order` 调到 5 让会话进 tab 行后，座位按钮里长出 `data-hotlist-tab-glyph` 的 span：文本是类别图标 `📌`、`data-hotlist-motion='bounce'`；宿主原来的文本节点仍是 `会话 tab-pin` —— 图标不写进标题文字 |
+| every category offers all three positions | `test:4175` | 六类 × `tab`/`sidebar`/`topbar` 共 18 个 `categories.<类>.surfaces.<面>` 行全部存在；`idle.surfaces.tab` 初始 `checked:true`，触发 `onChange()` 后设置里变 `false`，重渲染时摘要行那颗 `tab` chip 跟着变 `data-on='false'` —— 行与 chip 读的是同一份设置 |
+| export is an API, not a button | `test:4210` | 设置页里**没有** `data-hotlist-export` 节点、也没有任何行键含 `export`；但 `window.__HOTLIST__.export` 仍然是函数，`export({format:'json'})` 返回可 `JSON.parse` 的数组 —— 导出只从控制台走 |
+| a yielded title still shows a class glyph | `test:4225` | 标题自带 `🎓` 时侧栏仍建出 `data-hotlist-glyph` 槽位：`data-hotlist-char='🎓'`（用标题那颗而不是类别图标）、`data-hotlist-glyph-kind='emoji'`（所以能挂动效）、`style.display` 不是 `none`；同时宿主标题文本里那颗 emoji 被剥掉，只剩 `大聪明` |
+| equal order falls back to the class rank | `test:4257` | `error.order` 与 `pending.order` 同为 10、同一会话既报错又待审批时，`classify()` 判成 `error` —— 平手靠类别名次（`CATEGORY_RANK`）断，不靠 Map 插入顺序 |
+| the table only reads the surfaces that are on | `test:4271` | 三个面全开时该行 `surfaces` 三项全 `true`、`missing` 为空；band 落下（`bandUp:false`）且只开 tab 时 `surfaces` 变 `{tab:true,sidebar:false,topbar:false}` 但仍有一行；三个面全关时 `rows` 为空，而该会话进 `missing` 且 `reason==='position-off'` —— 不是悄悄消失 |
+| the table keeps a foreign pin out of the pinned class | `test:4306` | `scopeWorkspaceIds:['here']` 时别的会话的置顶不算置顶：行还在，但类别落 `idle`；把它划进本工作区、`pinned.order` 仍是默认 60 时还是 `idle`（置顶默认比 idle 弱）；只有把 `pinned.order` 提到 5，本工作区的置顶才变 `pinned`，而别的工作区那颗**无论 order 多高都不赢** |
+| a slot declared later never gets registered early | `test:4332` | 宿主先声明 `shell.overlay`、后声明 `conversation.view`：`apply()` 后顶栏进它自己的槽（`hotlist.topbar` 已注册），但**没有任何 `hotlist-seat-*`、也没有 `hotlist-table`**；等到 `conversation.view` 被声明，座位与看板才注册 —— 这就是 5.0.0-alpha.1 那次 `slot "conversation.view" is not declared` 启动崩的回归位 |
+| rows left out are grouped by reason, not dumped | `test:4361` | 落选行按固定阅读顺序分组成 `['over-cap','empty','subagent']`（不是按条数排名）；每组是一个 `<details>` 且默认折叠（`open===undefined`）；三个落选会话仍然都渲染在组里、各自带原 `data-hotlist-missing` 原因；每组头部 `hl-missingGroupCount` 报该组条数（此处三个 1） |
+| the cap has no auto mode and the window default replaces the old one | `test:4410` | `maxSeats` 行只剩 `[minus, plus]` 两个 stepper、没有第二个 `aria-pressed` 控件（自动档按钮已删）；`sanitizeSettings({maxSeats:6, collect:{recentWindowMinutes:5}})` 把未标记的 5 认成旧出厂默认、升到 **17**，而经页面写过的 5 会被记成用户选择、重载后仍是 5；`maxSeats:'auto'` 仍然合法（只是没有按钮），`buildSeatPlan` 按传进来的 `limit` 截断 |
+| display metadata: the plugin list can show a name and an icon | `test:4449` | 插件列表的元数据：`package.json` 的 `icon` 指向 `./icon.svg` 且 `exports['./icon']` 与 `exports['./locale/*.json']` 都在、`files` 含 `icon.svg` 与 `locale`；`locale/{en,zh}.json` 两种语言的 `meta.title`/`meta.description` 都非空；图标以 `<svg` 开头且 ≤256 KiB（宿主上限） |
+| ring player: off by default, one ring per entry when switched on | `test:4469` | 光圈默认全关（`ring.pending/error/completed` 都是 `false`，且不是 `choices` 里的用户选择）；开了以后同一个会话只在**进入**该类的那一次升一圈（同一类连续两次 sync 只一次）；`running`/`idle` 甚至不在 `RING_CATEGORIES` 里；1500 ms 节流共享 |
+| host ring: script arguments and no-pwsh safety | `test:4539` | 宿主半边三道闸：参数夹取（`seconds` 夹到 1–30、`scope`/`anim` 白名单）、`spawn` 必须挂 `child.on('error')`（不挂会打死 host）、脚本真的在包里（`files` 含 `tools/attn-ring` 且**不含** `tools`）且在磁盘上（`RING_SCRIPT` 可解析） |
+| the super reminder ships two clips, and the popout art is back to static | `test:4674` | 随包素材分家：`assets/manifest.json` 的 `total_webp_bytes` 是 **681462**（静态图那套），三类 × 四档逐条与磁盘字节相等、且每档 `px` 就是档位本身（不是把 500 px 动画缩下来）；光圈用的两段动画改放 `tools/attn-ring/media/`：`smack.gif` 10 帧、`wave.gif` 11 帧，都是 320×320 的 `GIF89a`、单份 <450 KiB 的包体预算 |
+| a gif ring reaches the script with its clip, and other animations stay untouched | `test:4703` | `ringArgs('seconds=4&anim=gif&cat=completed')` → `{seconds:4, scope:'Primary', anim:'Gif', gifCategory:'completed'}`，`ringCommand()` 的 `-Anim Gif` / `-GifCategory completed` 都到位；非法 `cat`（`<script>`）回落 `pending`、不会进 shell；`anim=Expand` 时 `cat` 被忽略、`-GifCategory` 根本不出现；`Expand`/`Breathe`/`None` 仍在白名单里 |
 
 ### 1.3 改测试时踩过的坑（照抄结论）
 
@@ -179,9 +182,9 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 - dsm 状态点顶替与还原（需要另一个插件真的在画点）。
 - 动效观感：`motionTarget:'row'`、`reduceMotion`、每类的「播放频率」（0–100% 滑块）与常驻预览——只能人眼看；`row` 目标现在带 1–2px 位移，标题应该看得出在动。
 - 设置页外观：token 是否在深色主题下正确、559px 内是否横向滚动、上传真实文件时 canvas/webp 是否可用；折叠态一张卡 ≈44px、展开态「置顶」卡 ≤520px（v4.4 真机：44 / 514 / 466；v4.5 少了全局区一行与 i18n 两键，v4.6.2 又删掉了「收藏」整类，卡片只剩 6 张，整体只会更矮）。
-- 设置页结构与版本标记（验收脚本靠它们一击命中）：页根 `data-hotlist-settings` 期望值是 **`v5.2.0`**；卡片 **6 张**（`error` / `pending` / `pinned` / `completed` / `running` / `idle`，4.6.2 起「收藏」整类已删）；折叠态 chip 共 **30 个**（6 卡 × 5），其中 6 个是 topbar 位（`data-disabled="true"` + `data-on="false"`）；全局区 8 行 `[data-hotlist-row]` = `maxSeats` / `pinned.maxSeats` / `collect.completedTtlMs` / `sound.volume` / `recentWindow` / `positions.tab` / `positions.topbar` / `takeOverStatusDot`。
+- 设置页结构与版本标记（验收脚本靠它们一击命中）：页根 `data-hotlist-settings` 期望值是 **`v5.2.1`**；卡片 **6 张**（`error` / `pending` / `pinned` / `completed` / `running` / `idle`，4.6.2 起「收藏」整类已删）；折叠态 chip 共 **30 个**（6 卡 × 5），其中 6 个是 topbar 位（`data-disabled="true"` + `data-on="false"`）；全局区 8 行 `[data-hotlist-row]` = `maxSeats` / `pinned.maxSeats` / `collect.completedTtlMs` / `sound.volume` / `recentWindow` / `positions.tab` / `positions.topbar` / `takeOverStatusDot`。
 - 置顶走宿主原生：置顶来自宿主快照 `pinnedSessionIds`（侧栏行 hover 的「置顶会话」按钮），`settings.pins` 已在 **4.6.0 废弃**、读时丢弃，设置页也没有上移/下移/取消置顶；插件只提供全局「置顶最多显示」`pinned.maxSeats`（0–12，默认 3，0 = 不显示置顶）。真机上置顶/取消置顶后座位应在两轮 `tick()` 内跟着变。
-- 「最近对话展示时间」在 5.1.8 之后**不再是两层范围**：设置页数字框给 **1–120** 分钟（`RECENT_WINDOW_UI`，`client.js:302`），与存储层上界一致（`RECENT_WINDOW_MINUTES`，`client.js:297`，`0`–`120`，默认 **17**；`0` = 不显示 idle）。仍要两只手都验：页面拖到 `1` 和 `120` 都要能落盘；走 API `window.__HOTLIST_SETTINGS__.set({ collect: { recentWindowMinutes: 0 } })` 也合法（只有页面不提供 0），重载后仍是 0。
+- 「最近对话展示时间」在 5.1.8 之后**不再是两层范围**：设置页数字框给 **1–120** 分钟（`RECENT_WINDOW_UI`，`client.js:307`），与存储层上界一致（`RECENT_WINDOW_MINUTES`，`client.js:302`，`0`–`120`，默认 **17**；`0` = 不显示 idle）。仍要两只手都验：页面拖到 `1` 和 `120` 都要能落盘；走 API `window.__HOTLIST_SETTINGS__.set({ collect: { recentWindowMinutes: 0 } })` 也合法（只有页面不提供 0），重载后仍是 0。
 - 浮层：真的会在「别的会话进入 error/pending/completed」时弹出来、位置在正确一侧（auto 时看左侧会话栏宽度）、点到图上会切到那个会话、超时自己收回且收回后 DOM 里没有残留节点。
 - 浮层的观感：clip 揭示的入场、breath/float 的待机、drop/particles 的退场，以及 `reduceMotion` 时是否只剩 120ms 淡入——单测只能证明属性写对了。
 - 离线/缺素材时的回落：删掉某个 `assets/<cat>-<tier>.webp` 后应回落到同名 `.svg`，再删 `.svg` 应回落 emoji，console 里有 `[hotlist] popout` 的 fallback 日志。
@@ -192,7 +195,7 @@ node --input-type=module -e "import {createRequire} from 'node:module';import fs
 
 1. `node --check client.js index.js test/classify.test.mjs`。
 2. `node cangku/tmp/261111_gate_pre_restart.mjs` → `STATIC VERDICT: clean`（查未声明常量、已删字段、新字段与模块形状；`node --check` 抓不到「引用一个没人声明的常量」这类崩溃）。
-3. `node test/classify.test.mjs` → `PASS — 109 groups`。
+3. `node test/classify.test.mjs` → `PASS — 112 groups`。
 4. 如果碰了排序：断言「同一批会话只变 `updatedAt` → registry 变更数不增加」（组 `adapter plan`），否则 tab 会每 30s 抖一次。
 5. 如果碰了注册/注销：断言座位 id 仍带 `hotlist-seat-` 前缀、`stop()` 后无残留节点/属性/样式（组 `adapter sidebar markers`、`surface gating`）。
 6. 如果碰了 CSS：断言所有样式文本不含 `[[`，且 takeover 规则只出现在 `data-hotlist-style="takeover"` 的 `<style>` 里（组 `takeover gate`、`styles stay valid`）。

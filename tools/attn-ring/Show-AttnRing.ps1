@@ -4,14 +4,16 @@
   特性：全屏置顶(WS_EX_TOPMOST|TOOLWINDOW)、不抢焦点(WS_EX_NOACTIVATE + ShowActivated=false)、
         半透明底 + 中心光圈、默认 4s 自动消失、Esc/点击可关、主屏/全部显示器、混合 DPI 正确定位。
   用法：
-    pwsh -NoProfile -File Show-AttnRing.ps1 [-Seconds 4] [-Scope Primary|All] [-Anim Expand|Breathe|None]
+    pwsh -NoProfile -File Show-AttnRing.ps1 [-Seconds 4] [-Scope Primary|All] [-Anim Expand|Breathe|None|Gif] [-GifCategory error|pending|completed]
+  -Anim Gif 播 media/<category>.gif（透明动画，不画光圈、不铺暗底）；素材缺失时退回 Expand 并在 stderr 记一行。
   计划中未实现参数（传了会提示，按默认值运行）：-Color -Thickness -OverlayAlpha -RadiusPx -ReassertMs -Quiet
 #>
 [CmdletBinding()]
 param(
     [ValidateRange(1, 30)][int]$Seconds = 4,
     [ValidateSet('Primary', 'All')][string]$Scope = 'Primary',
-    [ValidateSet('Expand', 'Breathe', 'None')][string]$Anim = 'Expand',
+    [ValidateSet('Expand', 'Breathe', 'None', 'Gif')][string]$Anim = 'Expand',
+    [ValidateSet('error', 'pending', 'completed')][string]$GifCategory = 'pending',
     # —— 以下仅占位（README 标「计划中」） ——
     [string]$Color = '',
     [int]$Thickness = 0,
@@ -27,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
     $self = $PSCommandPath
     $plist = @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $self,
-               '-Seconds', "$Seconds", '-Scope', $Scope, '-Anim', $Anim)
+               '-Seconds', "$Seconds", '-Scope', $Scope, '-Anim', $Anim, '-GifCategory', $GifCategory)
     $p = Start-Process pwsh -ArgumentList $plist -Wait -PassThru -NoNewWindow
     exit $p.ExitCode
 }
@@ -128,11 +130,44 @@ $GLOW_W = 26               # 光晕环粗 DIP
 
 $screens = if ($Scope -eq 'All') { [System.Windows.Forms.Screen]::AllScreens } else { @([System.Windows.Forms.Screen]::PrimaryScreen) }
 
+# ---------- Gif 素材：主屏一条透明动画替代琥珀环 ----------
+# WPF 自带 GifBitmapDecoder，能直接给出每一帧；不需要第三方解码库，也不需要
+# 把 GIF 拆成 PNG 序列（400px PNG 序列约 4.8 MB，两个 GIF 合计不到 800 KB）。
+$script:gifFrames = @()
+$script:gifIndex = 0
+$script:gifTimer = $null
+# 两个片段：拍击（error 与 pending 共用）与挥手（completed）
+$GIF_FILES = @{ error = 'smack.gif'; pending = 'smack.gif'; completed = 'wave.gif' }
+if ($Anim -eq 'Gif') {
+    $clip = $GIF_FILES[$GifCategory]
+    $mediaPath = Join-Path $PSScriptRoot ('media/' + $clip)
+    if (Test-Path -LiteralPath $mediaPath) {
+        try {
+            $uri = New-Object System.Uri($mediaPath)
+            $decoder = New-Object System.Windows.Media.Imaging.GifBitmapDecoder(
+                $uri,
+                [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat,
+                [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+            foreach ($f in $decoder.Frames) { $script:gifFrames += $f }
+        } catch {
+            [Console]::Error.WriteLine("attn-ring: $clip could not be decoded: " + $_.Exception.Message)
+            $script:gifFrames = @()
+        }
+    } else {
+        [Console]::Error.WriteLine("attn-ring: $clip is missing — falling back to the amber ring")
+    }
+    if ($script:gifFrames.Count -eq 0) {
+        # 降级：素材缺失/解不开就退回琥珀环，绝不静默什么都不显示
+        $Anim = 'Expand'
+    }
+}
+
 $script:app = New-Object System.Windows.Application
 $script:app.ShutdownMode = [System.Windows.ShutdownMode]::OnExplicitShutdown
 
 $script:screenInfo = @()
 $script:windows = New-Object System.Collections.Generic.List[System.Windows.Window]
+$script:gifImages = New-Object System.Collections.Generic.List[System.Windows.Controls.Image]
 $script:manualClose = $false
 $script:fading = $false
 $script:closeReason = 'unknown'
@@ -161,6 +196,23 @@ function New-RingWindow($screen) {
     $ringD  = [Math]::Round($dipMin * 0.42)
 
     $grid = New-Object System.Windows.Controls.Grid
+
+    if ($Anim -eq 'Gif') {
+        # 透明动画：不铺暗底、不画光圈，只有人物。背景保持全透明，桌面照样看得见。
+        # 画面里人物比 40 px 的琥珀环更能占视线，所以按屏高收一点：约 1/3 屏、
+        # 上限 340 DIP，既有存在感，又不至于糊在正在读的正文上。
+        $artD = [Math]::Round([Math]::Min($dipMin * 0.34, 340))
+        $img = New-Object System.Windows.Controls.Image
+        $img.Width = $artD; $img.Height = $artD
+        $img.Stretch = [System.Windows.Media.Stretch]::Uniform
+        $img.Source = $script:gifFrames[0]
+        $img.HorizontalAlignment = 'Center'
+        $img.VerticalAlignment = 'Center'
+        [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($img, [System.Windows.Media.BitmapScalingMode]::HighQuality)
+        [void]$grid.Children.Add($img)
+        $script:gifImages += $img
+    }
+    else {
     $veil = New-Object System.Windows.Shapes.Rectangle
     $veil.Fill = New-Object System.Windows.Media.SolidColorBrush(
         [System.Windows.Media.Color]::FromArgb($VEIL_ALPHA, 0, 0, 0))
@@ -214,6 +266,7 @@ function New-RingWindow($screen) {
                          [System.Windows.Media.ScaleTransform]::ScaleYProperty)) { $st.BeginAnimation($p, $breath) }
     }
     # Anim=None：静态
+    }
 
     $w.Content = $grid
     # 把物理像素坐标挂到 Tag 上：事件处理器里不捕获局部变量（GetNewClosure 的闭包会让
@@ -249,6 +302,7 @@ foreach ($s in $screens) { $script:windows.Add((New-RingWindow $s)) }
 function Close-All {
     if ($script:fading) { return }
     $script:fading = $true
+    if ($script:gifTimer -ne $null) { try { $script:gifTimer.Stop() } catch { } }
     $fadeOut = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0,
         (New-Object System.Windows.Duration([TimeSpan]::FromMilliseconds(260))))
     $fadeOut.add_Completed({
@@ -283,6 +337,18 @@ $escWatch.add_Tick({
 })
 $escWatch.Start()
 
+# 帧推进：30 ms 一帧（源 GIF 的每帧时长），只改 Image.Source，不动布局
+if ($Anim -eq 'Gif' -and $script:gifFrames.Count -gt 1) {
+    $script:gifTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:gifTimer.Interval = [TimeSpan]::FromMilliseconds(30)
+    $script:gifTimer.add_Tick({
+        $script:gifIndex = ($script:gifIndex + 1) % $script:gifFrames.Count
+        $frame = $script:gifFrames[$script:gifIndex]
+        foreach ($img in $script:gifImages) { $img.Source = $frame }
+    })
+    $script:gifTimer.Start()
+}
+
 # 显示
 foreach ($w in $script:windows) { $w.Show() }
 $fgDuring = [Native]::GetForegroundWindow()
@@ -292,6 +358,8 @@ $fgDuring = [Native]::GetForegroundWindow()
     seconds            = $Seconds
     scope              = $Scope
     anim               = $Anim
+    gifCategory        = $(if ($Anim -eq 'Gif') { $GifCategory } else { $null })
+    gifFrames          = $script:gifFrames.Count
     dpiPath            = $dpiPath
     foregroundBefore   = '0x' + $fgBefore.ToString('X')
     foregroundDuring   = '0x' + $fgDuring.ToString('X')

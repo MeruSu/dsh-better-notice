@@ -40,7 +40,11 @@ const RING_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "tools", "attn
 /** The only three parameters the script implements; the rest of its tail is inert. */
 const RING_SECONDS = { min: 1, max: 30, fallback: 4 };
 const RING_SCOPES = ["Primary", "All"];
-const RING_ANIMS = ["Expand", "Breathe", "None"];
+/** `Gif` draws one transparent clip instead of the amber ring; the three ring
+ *  animations stay exactly as they were. */
+const RING_ANIMS = ["Expand", "Breathe", "None", "Gif"];
+/** Which clip a `Gif` ring plays. `error` and `pending` share the smack, `completed` waves. */
+const RING_GIF_CATEGORIES = ["error", "pending", "completed"];
 
 /** One ring per this window: a burst of state changes must not stack processes. */
 const RING_COOLDOWN_MS = 2500;
@@ -95,20 +99,28 @@ function ringArgs(query) {
   const rawSeconds = Number(query.get("seconds"));
   const seconds = Number.isFinite(rawSeconds) ? Math.round(rawSeconds) : RING_SECONDS.fallback;
   const scope = query.get("scope");
-  const anim = query.get("anim");
+  const requested = query.get("anim");
+  const lower = typeof requested === "string" ? requested.toLowerCase() : "";
+  const anim = RING_ANIMS.find((name) => name.toLowerCase() === lower) ?? RING_ANIMS[0];
+  // `cat` only means something to a `Gif` ring. A stray `cat` on the amber ring is
+  // ignored rather than quietly turning the request into something else.
+  const wanted = query.get("cat");
+  const gifCategory = anim !== "Gif"
+    ? null
+    : RING_GIF_CATEGORIES.includes(wanted) ? wanted : "pending";
   return {
     seconds: Math.min(RING_SECONDS.max, Math.max(RING_SECONDS.min, seconds)),
     scope: RING_SCOPES.includes(scope) ? scope : RING_SCOPES[0],
-    anim: RING_ANIMS.includes(anim) ? anim : RING_ANIMS[0],
+    anim,
+    gifCategory,
   };
 }
 
 /** The exact argv the script is started with; also what a test asserts on. */
 function ringCommand(args, scriptPath = RING_SCRIPT) {
-  return {
-    script: scriptPath,
-    argv: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Seconds", String(args.seconds), "-Scope", args.scope, "-Anim", args.anim],
-  };
+  const argv = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Seconds", String(args.seconds), "-Scope", args.scope, "-Anim", args.anim];
+  if (args.anim === "Gif") argv.push("-GifCategory", args.gifCategory);
+  return { script: scriptPath, argv };
 }
 
 /** The `pwsh` this host would start, or null when the machine has none on PATH. */
@@ -218,4 +230,4 @@ function apply(ctx) {
   });
 }
 
-export { apply, RING_ANIMS, RING_ROUTE, RING_SCRIPT, RING_SCOPES, SOUND_ROUTE, ringArgs, ringCommand, serveRing, spawnRing };
+export { apply, RING_ANIMS, RING_GIF_CATEGORIES, RING_ROUTE, RING_SCRIPT, RING_SCOPES, SOUND_ROUTE, ringArgs, ringCommand, serveRing, spawnRing };

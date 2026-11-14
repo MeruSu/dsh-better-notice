@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.2.0';
+    const VERSION = '5.2.1';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -244,8 +244,13 @@ window.__ModuleLoader__.load({
     const RING_CATEGORIES = ['pending', 'error', 'completed'];
     /** The host route that starts the ring process; `client.js` only ever asks. */
     const RING_ROUTE = '/hotlist-ring';
-    /** What the page asks for: the script's own documented defaults, spelled out once. */
-    const RING_OPTIONS = { seconds: 4, scope: 'Primary', anim: 'Expand' };
+    /**
+     * What the page asks for. `anim: 'Gif'` means "one transparent clip instead of
+     * the amber ring", and the trigger class picks the clip: `error` and `pending`
+     * share the button-smack, `completed` waves. A host too old to know the value
+     * falls back to the amber ring on its own.
+     */
+    const RING_OPTIONS = { seconds: 4, scope: 'Primary', anim: 'Gif' };
     /** Two rings closer than this are one event: the host enforces the same idea. */
     const RING_THROTTLE_MS = 1500;
     const CHOICE_LIMIT = 256;
@@ -601,7 +606,7 @@ window.__ModuleLoader__.load({
       'settings.group.icon': '图标',
       'settings.group.popout': '弹出',
       'settings.group.sound': '音效',
-      'settings.group.ring': '全屏提醒',
+      'settings.group.ring': '超级提醒',
       'settings.group.order': '顺序',
       'settings.category.pinned': '置顶',
       'settings.category.error': '报错',
@@ -674,12 +679,12 @@ window.__ModuleLoader__.load({
       'settings.sound.preview': '试听',
       'settings.sound.previewHint': '点一下立刻播一条；浏览器可能拦截自动播放。',
       'settings.ring.pending': '有待处理时',
-      'settings.ring.pendingHint': '有会话在等你批准或回答时，在最上层闪一次光圈。',
+      'settings.ring.pendingHint': '有会话在等你批准或回答时，整块屏幕升起一段动画提醒。',
       'settings.ring.error': '有报错时',
-      'settings.ring.errorHint': '有会话这一轮失败时闪一次。',
+      'settings.ring.errorHint': '有会话这一轮失败时，整块屏幕提醒一次。',
       'settings.ring.completed': '有会话跑完时',
-      'settings.ring.completedHint': '有会话刚结束时闪一次。',
-      'settings.ring.hint': '光圈盖住整块屏幕、只显示几秒，不抢键盘焦点；点一下或按 Esc 立刻关。三个开关默认都关。',
+      'settings.ring.completedHint': '有会话刚结束时，整块屏幕提醒一次。',
+      'settings.ring.hint': '默认是整块屏幕上的透明动画（拍击或挥手，按类别自动挑），不是光圈；光圈仍在——那是脚本 -Anim Expand/Breathe/None 那条路，设了才用。提醒只显示几秒、不抢键盘焦点，点一下或按 Esc 立刻关；三个开关默认都关。',
       'settings.order': '顺序',
       'settings.orderHint': '1–99，数字越小越靠前。',
       'settings.takeOverStatusDotOff': '已停用：dsh-sessions-manager 的状态点将恢复显示。',
@@ -798,7 +803,7 @@ window.__ModuleLoader__.load({
       'settings.group.icon': 'Icon',
       'settings.group.popout': 'Popout',
       'settings.group.sound': 'Sound',
-      'settings.group.ring': 'Full-screen ring',
+      'settings.group.ring': 'Super reminder',
       'settings.group.order': 'Order',
       'settings.category.pinned': 'Pinned',
       'settings.category.error': 'Failed',
@@ -871,12 +876,12 @@ window.__ModuleLoader__.load({
       'settings.sound.preview': 'Preview',
       'settings.sound.previewHint': 'Clicking plays one now; the browser may still block autoplay.',
       'settings.ring.pending': 'When something waits',
-      'settings.ring.pendingHint': 'One ring on top of the screen while a session waits for your approval or answer.',
+      'settings.ring.pendingHint': 'A short animation rises over the whole screen while a session waits for your approval or answer.',
       'settings.ring.error': 'On a failure',
-      'settings.ring.errorHint': 'One ring when a session fails its turn.',
+      'settings.ring.errorHint': 'The whole screen reminds you once when a session fails its turn.',
       'settings.ring.completed': 'When a run finishes',
-      'settings.ring.completedHint': 'One ring when a session just finished.',
-      'settings.ring.hint': 'The ring covers the screen for a few seconds and never takes keyboard focus; a click or Esc closes it at once. All three switches start off.',
+      'settings.ring.completedHint': 'The whole screen reminds you once when a session just finished.',
+      'settings.ring.hint': 'By default this is a transparent animation over the whole screen (tap or wave, picked by category), not a ring. The amber ring is still there — that is the script -Anim Expand/Breathe/None path, used only if you ask for it. The reminder shows for a few seconds, never takes keyboard focus, and a click or Esc closes it at once. All three switches start off.',
       'settings.order': 'Order',
       'settings.orderHint': '1–99, lower comes first.',
       'settings.takeOverStatusDotOff': 'Disabled: status dots from dsh-sessions-manager show again.',
@@ -5085,6 +5090,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       let armed = false;
       let lastAt = -Infinity;
 
+      /** A warning is one clip, so the trigger class picks which one plays. */
+      function clipOf(category) {
+        return category === 'completed' ? 'completed' : category === 'error' ? 'error' : 'pending';
+      }
+
       function ring(category, at) {
         const settings = getSettings();
         if (settings.ring?.[category] !== true) {
@@ -5098,7 +5108,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         lastAt = at;
         log('ring', category);
         try {
-          request({ category, seconds: RING_OPTIONS.seconds, scope: RING_OPTIONS.scope, anim: RING_OPTIONS.anim });
+          request({ category: clipOf(category), seconds: RING_OPTIONS.seconds, scope: RING_OPTIONS.scope, anim: RING_OPTIONS.anim });
           return true;
         } catch (thrown) {
           log('failed', thrown instanceof Error ? thrown.message : String(thrown));
@@ -6050,12 +6060,15 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           onClick: () => switchTo(chip.id, topbarModel.currentId, () => {}),
           style: chipStyle(chipWidthFor(chip)),
         };
-        /** Declared even while idle, so the acceptance probe can read which motion a pill owns. */
-        if (chip.motion !== void 0 && chip.motion !== 'none') attrs['data-hotlist-chip-motion'] = chip.motion;
-        if (burst !== void 0) {
-          attrs['data-hotlist-chip-burst'] = '';
+        /**
+         * Both attributes are declared even while idle: the always-on animation
+         * keys off them, and the acceptance probe reads which motion a pill owns.
+         */
+        if (chip.motion !== void 0 && chip.motion !== 'none') {
+          attrs['data-hotlist-chip-motion'] = chip.motion;
           attrs['data-hotlist-chip-target'] = chip.motionTarget === 'row' ? 'row' : 'emoji';
         }
+        if (burst !== void 0) attrs['data-hotlist-chip-burst'] = '';
         return h('button', attrs, [
           chip.emoji === '' || chip.emoji === void 0
             ? null
@@ -6162,22 +6175,49 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       /**
        * The band carries its own stylesheet instead of leaning on the sidebar's:
        * `SIDEBAR_STYLE` is in the document only while the sidebar adapter runs,
-       * and the band has to animate with the sidebar off. The four `hl-*`
-       * keyframes are the same definitions the sidebar uses (a second identical
-       * `@keyframes` is inert); `hl-chip-nudge` is band-only because a 24 px
-       * pill must not scale the way a 16 px glyph may.
+       * and the band has to animate with the sidebar off.
+       *
+       * Two layers, exactly like the sidebar glyph and the tab seat:
+       *
+       *   - **Always on** — a pill whose category has a motion animates for as long
+       *     as it is on screen (`infinite`). This is what the user asked for: the
+       *     band must not look frozen next to a moving sidebar icon. `emoji`
+       *     targets spin the glyph; `row` targets move the **title span** with the
+       *     `hl-text-*` variants (text only translates and fades, never scales — a
+       *     24 px pill has no room for a scale and text blurs).
+       *   - **Burst** — when that category's frequency rolls a hit, one single
+       *     shot (`1`) plays. The burst rules carry one more attribute selector,
+       *     so they outrank the always-on rule without `!important`.
+       *
+       * The `hl-*` / `hl-text-*` keyframes are the same definitions the sidebar
+       * uses (a second identical `@keyframes` is inert); they are repeated here so
+       * the band works with the sidebar off.
        */
       const CHIP_CSS = [
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-emoji]{animation:hl-spin 2.4s linear infinite;will-change:transform}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-emoji]{animation:hl-pulse 1.6s ease-in-out infinite;will-change:transform}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-emoji]{animation:hl-bounce 1.2s ease-in-out infinite;will-change:transform}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-emoji]{animation:hl-blink 1.2s ease-in-out infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-title]{animation:hl-text-spin 2.4s linear infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-title]{animation:hl-text-pulse 1.6s ease-in-out infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-title]{animation:hl-text-blink 1.2s ease-in-out infinite}',
         '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-emoji]{animation:hl-spin 2.4s linear 1}',
         '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-emoji]{animation:hl-pulse 1.6s ease-in-out 1}',
         '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-emoji]{animation:hl-bounce 1.2s ease-in-out 1}',
         '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-emoji]{animation:hl-blink 1.2s ease-in-out 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"]{animation:hl-chip-nudge 1.2s ease-in-out 1}',
-        '@keyframes hl-chip-nudge{0%,100%{transform:translateY(0)}40%{transform:translateY(-2px)}70%{transform:translateY(0)}90%{transform:translateY(-1px)}}',
+        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-title]{animation:hl-text-spin 2.4s linear 1}',
+        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-title]{animation:hl-text-pulse 1.6s ease-in-out 1}',
+        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out 1}',
+        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-title]{animation:hl-text-blink 1.2s ease-in-out 1}',
         '@keyframes hl-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
         '@keyframes hl-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}',
         '@keyframes hl-bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}70%{transform:translateY(0)}90%{transform:translateY(-1.5px)}}',
         '@keyframes hl-blink{0%,100%{opacity:1}50%{opacity:.35}}',
+        '@keyframes hl-text-spin{0%,100%{opacity:1;transform:translateY(0)}25%{opacity:.7;transform:translateY(-1px)}75%{opacity:.85;transform:translateY(1px)}}',
+        '@keyframes hl-text-pulse{0%,100%{opacity:1;transform:translateX(0)}50%{opacity:.55;transform:translateX(1px)}}',
+        '@keyframes hl-text-bounce{0%,100%{opacity:1;transform:translateY(0)}40%{opacity:.45;transform:translateY(-2px)}70%{opacity:1;transform:translateY(0)}90%{opacity:.9;transform:translateY(-1px)}}',
+        '@keyframes hl-text-blink{0%,100%{opacity:1;transform:none}50%{opacity:.35}}',
         `html[${REDUCE_MOTION_ATTR}] [data-hotlist-chip]{animation:none !important}html[${REDUCE_MOTION_ATTR}] [data-hotlist-chip] *{animation:none !important}`,
         '@media (prefers-reduced-motion:reduce){[data-hotlist-chip],[data-hotlist-chip] *{animation:none !important}}',
       ].join('');
@@ -6759,8 +6799,9 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       ctx.effect(() => {
         ring = createRingPlayer({
           getSettings: readSettings,
-          request: ({ seconds, scope, anim }) => {
+          request: ({ category, seconds, scope, anim }) => {
             const query = new URLSearchParams({ seconds: String(seconds), scope, anim });
+            query.set('cat', category);
             void fetch(`${RING_ROUTE}?${query.toString()}`, {
               method: 'GET',
               headers: { 'x-hotlist-ring': '1' },
