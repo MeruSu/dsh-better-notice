@@ -34,9 +34,9 @@ dsh --profile <profile>
 
 `Requires DSH ≥ 0.2.x` — exact compatibility statement pending confirmation.
 
-- Package `dsh-better-notice` (module id is the same string); version `5.3.2`; MIT.
+- Package `dsh-better-notice` (module id is the same string); version `5.3.4`; MIT.
 - Settings live in **account menu → Settings → “Better Notice”**.
-- Verify: `window.__HOTLIST_VERSION__` prints `'5.3.2'`, the left nav has **“Better Notice”**, and sidebar rows start with a status glyph.
+- Verify: `window.__HOTLIST_VERSION__` prints `'5.3.4'`, the left nav has **“Better Notice”**, and sidebar rows start with a status glyph.
 - Published on npm: [dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice). If npm is unreachable, the same tarball is attached to the [latest release](https://github.com/MeruSu/better-notice/releases) — `dsh plugin --profile <profile> add <absolute path>/dsh-better-notice-5.3.2.tgz` does the same job.
 - Installing from a local directory uses `link:` (code edits need no reinstall) and needs an **absolute path with forward slashes** — `dsh plugin` forwards the argument to pnpm inside the profile directory.
 - Uninstall: `dsh plugin --profile <profile> remove dsh-better-notice`.
@@ -632,7 +632,7 @@ s.lastError()      // last storage write error (string or null)
 
 // settings + the three asset pools
 const api = window.__HOTLIST__;
-api.version                                        // '5.3.2'
+api.version                                        // '5.3.4'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }

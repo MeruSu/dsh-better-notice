@@ -2,7 +2,7 @@
 
 目标读者：下一个要改这份代码的人。看完应该能回答三件事——状态从哪来、三种显示位置各自怎么挂、哪些地方看起来"脏"但**换干净写法会更糟**。
 
-所有行号对 `client.js`（**8142 行，v5.3.2**）。**行号是起点不是真理**：文件一改就漂，按符号名搜（`grep -n 'function classify' client.js`）才准。
+所有行号对 `client.js`（**8163 行，v5.3.4**）。**行号是起点不是真理**：文件一改就漂，按符号名搜（`grep -n 'function classify' client.js`）才准。
 
 这批 `client.js:N` 在 **v5.3.2 又整体重钉过一次**，做法是拿**上一版快照**（`git show HEAD:client.js`，7914 行）当基准：对每个旧行号先找出它落在旧文件的哪个定义符号里，再定位新文件（8142 行）里同名符号的定义行，最后按原偏移平移（区间保持原长度，符号消失就报出来不猜）。所以每条引用都仍然落在**同一个符号内部**，只是绝对行号变了。`test:N` 的 **123 条**同样按测试名从源码行号重新对齐（`docs/TESTING.md` §1.2 的行号就是真值）。
 
@@ -122,6 +122,7 @@ api-session/error│ sidebarStateOf          client.js:3572 │
 - 只插入一个 `span[data-hotlist-glyph]` 到**标题 span 之前**（`findRowTitle`，`client.js:3552`：`_title` 类名 → 文本等于 `displayTitle` → 非时间文本 → 第二个 span；找不到就只动图标并 debug 一行，绝不抛）。
 - 我们自己的节点**绝不带 `data-state`**，也不放文本节点（emoji 用 `::before{content:attr(data-hotlist-char)}`，方图用 `<img alt="">`），避免被宿主的选择器或无障碍树误认。
 - `motionTarget:'row'` 时对**宿主标题**写 inline `animation`（同 keyframes、同相位），停用/换状态/卸载时还原原值（`applyMotion`，`client.js:3831`）。文字动效只许 `opacity`/`translate`，禁 `scale`（字会糊）。
+- **tab 座位不吃 `motionTarget`**：宿主 tab 的 label 是一段被宿主渲染并复用的字符串，包住它会打乱宿主布局，也会让图标停在 `none`（5.3.2 的回归，5.3.4 回退）。规矩是「这个 tab 属于哪个类别，它的 emoji 就有那个类别的动效」，`decorateTabSeat` 里 `moveTitle` 恒为假（`client.js:6712-6772`），`[data-hotlist-tab-title]` 只在清理时出现。
 - `MAX_MISSES=60`（`client.js:3338`）：连续找不到行/标题就整块停用（删自己的节点与样式），30 秒后再试，避免在 DOM 大改后继续乱贴。
 - **tab label 是字符串管线**：`dsh-client-ui-conversation:20767-20776` 用 `{label}` 画文本，所以 tab 上只有 emoji，不能放图片（图片只能进我们自己的 React 树：设置页预览、未来的顶栏/浮层）。
 

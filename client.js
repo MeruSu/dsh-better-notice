@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.3.2';
+    const VERSION = '5.3.4';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -172,6 +172,14 @@ window.__ModuleLoader__.load({
     const BACKUP_LIMIT = 5;
     const LEGACY_SETTINGS_KEY = 'dsh.session-switcher.settings';
     const SETTINGS_VERSION = 4;
+  /**
+   * Dev-build reset latch. The stored values sit inside a WebView2 LevelDB that the
+   * running app keeps locked, so deleting the file is not reliably possible while the
+   * app is open. Bumping this generation drops this plugin's own records on the next
+   * load instead — same clean slate, without touching the app's storage.
+   */
+  const RESET_GENERATION = 1;
+  const RESET_KEY = 'dsh.hotlist.resetGen.v1';
     /** Settings section: `settings.section` nav entry for this plugin. */
     const SECTION_ID = 'hotlist';
     /** After the official sections (account -10, general 0, models 10, plugins 15, agent-presets 20). */
@@ -2438,11 +2446,34 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
      * anything else goes through the migration chain (v3 -> v4 -> v5) and is
      * rewritten under the current key.
      */
+    /**
+     * One-shot factory reset for development builds: when the stored generation is
+     * behind `RESET_GENERATION`, this plugin's own records are dropped before they are
+     * read, so the next paint uses `defaultSettings()`. Idempotent — it stamps the key
+     * so a second load leaves the (now clean) store alone.
+     */
+    function applyResetGeneration() {
+      if (typeof localStorage === 'undefined') return;
+      try {
+        const seenText = localStorage.getItem(RESET_KEY);
+        const seen = seenText === null ? 0 : Number(seenText);
+        if (Number.isFinite(seen) && seen >= RESET_GENERATION) return;
+        localStorage.removeItem(SETTINGS_KEY);
+        localStorage.removeItem(PRESERVED_KEY);
+        localStorage.removeItem(BACKUP_KEY);
+        localStorage.removeItem(RING_STATE_KEY);
+        localStorage.removeItem(COMPLETED_AT_KEY);
+        localStorage.setItem(RESET_KEY, String(RESET_GENERATION));
+        console.warn('[hotlist] settings reset to the factory defaults, generation', RESET_GENERATION);
+      } catch { /* storage unavailable: nothing to reset */ }
+    }
+
     function readSettings() {
       if (typeof localStorage === 'undefined') {
         settingsCache = settingsCache ?? defaultSettings();
         return injectedSettings === null ? settingsCache : sanitizeSettings(mergePatch(settingsCache, upgradePatch(injectedSettings)));
       }
+      applyResetGeneration();
       const stored = readStored(SETTINGS_KEY);
       const migrated = migrateSettings(stored);
       if (stored === void 0) {
@@ -6687,12 +6718,13 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         const category = seat.category ?? (token === null ? 'running' : (CATEGORY_OF_TOKEN[token] ?? 'running'));
         const moved = shown === '' || token === null ? { motion: 'none', motionTarget: 'glyph' } : tokenMotion(settings, token);
         /**
-         * Same rule as the band and the sidebar: `motionTarget` decides which
-         * node moves, `frequency` decides when. A row target wraps the title
-         * text and animates that; the glyph stays painted but still.
+         * A tab seat animates its glyph and nothing else. `motionTarget` is a
+         * band/sidebar concept: the tab label is a host button whose text the
+         * host also owns, so wrapping it broke the host layout and left the
+         * hourglass frozen. The rule is "the emoji in this tab always moves when
+         * its category has a motion".
          */
-        const moveTitle = moved.motion !== 'none' && moved.motionTarget === 'row';
-        const phase = moveTitle || moved.motion !== 'none'
+        const phase = moved.motion !== 'none'
           ? motionPhaseOf(seat.sessionId, category, MOTION_MS[moved.motion] ?? 1200)
           : 0;
         const delay = moved.motion !== 'none' ? 'calc(-1 * ' + phase + 'ms)' : void 0;
@@ -6704,22 +6736,12 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             ? (holder.parentElement ?? button)
             : holder;
           let glyph = parent.querySelector('[' + TAB_GLYPH_ATTR + ']');
-          let titleSpan = parent.querySelector('[' + TAB_TITLE_ATTR + ']');
-          if (moveTitle === true) {
-            if (titleSpan === null) {
-              titleSpan = document.createElement('span');
-              titleSpan.setAttribute(TAB_TITLE_ATTR, '');
-              parent.insertBefore(titleSpan, textNode);
-              titleSpan.appendChild(textNode);
-            }
-            if (titleSpan.getAttribute('data-hotlist-motion') !== moved.motion) titleSpan.setAttribute('data-hotlist-motion', moved.motion);
-            if (titleSpan.style.animationDelay !== delay) titleSpan.style.animationDelay = delay;
-          } else if (titleSpan !== null) {
-            /** Back to a glyph target: unwrap the title so the host owns it again. */
-            const text = titleSpan.childNodes?.[0] ?? titleSpan.children?.[0] ?? null;
-            if (text !== null) parent.insertBefore(text, titleSpan);
-            titleSpan.remove();
-            titleSpan = null;
+          const wrapped = parent.querySelector('[' + TAB_TITLE_ATTR + ']');
+          if (wrapped !== null) {
+            /** An earlier build wrapped the title; unwrap it so the host owns it again. */
+            const text = wrapped.childNodes?.[0] ?? wrapped.children?.[0] ?? null;
+            if (text !== null) parent.insertBefore(text, wrapped);
+            wrapped.remove();
           }
           if (shown === '') {
             if (glyph !== null) glyph.remove();
@@ -6733,8 +6755,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             parent.insertBefore(glyph, textNode);
           }
           if (glyph.textContent !== shown) glyph.textContent = shown;
-          const glyphMotion = moveTitle === true ? 'none' : moved.motion;
-          if (glyph.getAttribute('data-hotlist-motion') !== glyphMotion) glyph.setAttribute('data-hotlist-motion', glyphMotion);
+          if (glyph.getAttribute('data-hotlist-motion') !== moved.motion) glyph.setAttribute('data-hotlist-motion', moved.motion);
           if (glyph.style.animationDelay !== delay) glyph.style.animationDelay = delay;
           /** One emoji, never two: the host text keeps only the title. */
           if (textNode.textContent !== wanted) textNode.textContent = wanted;

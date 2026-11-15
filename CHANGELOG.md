@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.3.4 — 2026-11-15
+
+**修复：tab 座位的沙漏又转起来了。** 5.3.2 让 tab 座位跟着 `motionTarget` 走（默认 `'row'`），结果它把宿主 tab 的标题包进我们自己的 span、把图标停在 `none` —— 用户看到的正是「Tab 栏的沙漏不转了」。这一版把规矩改回一句话：**tab 座位只动图标，宿主标题永不包**。`motionTarget` 仍然是侧栏行与顶栏胶囊的设置。
+
+- `decorateTabSeat` 的 `moveTitle` 恒为假（`client.js:6712-6772`），`[data-hotlist-tab-title]` 只在清理旧 DOM 时出现。
+- 真机取证（meru-test 59570，5.3.4）：一个前台阻塞的会话在 tab 行是 `⏳`、`data-hotlist-motion="spin"`、`animation-name: hl-spin`、`animation-duration: 2.4s`，两次相隔 0.9 秒取 `transform` 分别是 `matrix(-0.93, 0.37, …)` 与 `matrix(0.43, -0.90, …)` —— 真的在转。
+- 单测仍 **123 组**，第 97 组改名为 `tab seats always move the glyph and never wrap the host title`（`test:5159`），第 98 组的相位断言改读 tab 的图标。
+
 ## 5.3.2 — 2026-11-15
 
 超级提醒从「进入状态就弹一次」改成**锁存等待**：状态要原样停够设定的分钟数才升起来，之后每隔同样的间隔再补一次、用完次数为止。另外顶栏胶囊与 tab 座位的动效**对齐了相位**，同一会话在两个面打开的是同一关键帧的同一位置。`SETTINGS_VERSION` 仍是 `4`。

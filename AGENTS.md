@@ -3,7 +3,7 @@
 This file is for AI coding agents. It says what this plugin already does, so you
 do not rebuild it, and what will break the host if you get it wrong.
 
-- Package: `dsh-better-notice` · version `5.3.2` · MIT
+- Package: `dsh-better-notice` · version `5.3.4` · MIT
 - Host: DeepSeek Harness (DSH) Web UI
 - One command to install: `dsh plugin --profile <profile> add dsh-better-notice`
 - One-page summary for scrapers: [llms.txt](llms.txt) · human docs: [README.md](README.md)
@@ -130,7 +130,7 @@ authenticated** — publish public assets only, never user data.
 
 ```js
 window.__HOTLIST__ = {
-  version,                                              // "5.3.2"
+  version,                                              // "5.3.4"
   settings: { get, set, reset, subscribe, backups, restore },
   assets:   { add, list, clear, preview },
   audio,                                                // read-only headphone-gate probe

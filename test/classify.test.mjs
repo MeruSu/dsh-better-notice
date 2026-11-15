@@ -4188,11 +4188,10 @@ test('tab seats draw the same glyph and motion', () => {
     const glyph = button.children.find((child) => child.hasAttribute('data-hotlist-tab-glyph'));
     assert.ok(glyph !== undefined, 'the seat grew a glyph span');
     assert.equal(glyph.textContent, '📌', 'it draws the class glyph');
-    assert.equal(glyph.getAttribute('data-hotlist-motion'), 'none', 'a row target parks the glyph');
+    assert.equal(glyph.getAttribute('data-hotlist-motion'), 'bounce', 'the glyph always carries the class motion, even with a row target');
     const title = button.children.find((child) => child.hasAttribute('data-hotlist-tab-title'));
-    assert.ok(title !== undefined, 'a row target wraps the title text');
-    assert.equal(title.getAttribute('data-hotlist-motion'), 'bounce', 'the title carries the class motion');
-    assert.equal(title.style.animationDelay, 'calc(-1 * ' + api.motionPhaseOf('tab-pin', 'pinned', 1200) + 'ms)', 'the seat opens the keyframe at the shared phase');
+    assert.equal(title, undefined, 'a tab never wraps the host title text');
+    assert.equal(glyph.style.animationDelay, 'calc(-1 * ' + api.motionPhaseOf('tab-pin', 'pinned', 1200) + 'ms)', 'the seat opens the keyframe at the shared phase');
     assert.equal(textNode.textContent, '会话 tab-pin', 'the host text keeps only the title');
   } finally {
     harness.cleanup();
@@ -5156,8 +5155,8 @@ test('audio config: the prompt never leaks a placeholder or a home directory', (
   assert.equal(noConfig.includes('{{'), false);
 });
 
-// 97. The tab seat moves what motionTarget says: title for a row target, glyph for a glyph target.
-test('tab seats move the title for a row target and the glyph for a glyph target', () => {
+// 97. The tab seat always moves its glyph; the host title is never wrapped.
+test('tab seats always move the glyph and never wrap the host title', () => {
   tabRow.children.length = 0;
   const button = el('button');
   button.setAttribute('role', 'tab');
@@ -5177,14 +5176,15 @@ test('tab seats move the title for a row target and the glyph for a glyph target
     const asElement = (child) => typeof child.hasAttribute === 'function';
     const glyph = () => button.children.find((child) => asElement(child) && child.hasAttribute('data-hotlist-tab-glyph'));
     const title = () => button.children.find((child) => asElement(child) && child.hasAttribute('data-hotlist-tab-title'));
-    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'none', 'row target parks the glyph');
-    assert.equal(title().getAttribute('data-hotlist-motion'), 'bounce', 'and the wrapped title moves');
+    assert.equal(api.readSettings().categories.pinned.glyph.motionTarget, 'row', 'the shipped default is a row target');
+    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'bounce', 'a row target still moves the tab glyph');
+    assert.equal(title(), undefined, 'and never wraps the host title');
     api.writeSettings({ categories: { pinned: { glyph: { ...api.readSettings().categories.pinned.glyph, motionTarget: 'glyph' } } } });
     assert.equal(glyph().getAttribute('data-hotlist-motion'), 'bounce', 'a glyph target moves the glyph');
-    assert.equal(title(), undefined, 'and never wraps the title');
+    assert.equal(title(), undefined, 'still no title wrapper');
     api.writeSettings({ categories: { pinned: { glyph: { ...api.readSettings().categories.pinned.glyph, motionTarget: 'row' } } } });
-    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'none', 'back to row: the glyph parks again');
-    assert.ok(title() !== undefined, 'and the title wraps again');
+    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'bounce', 'back to row: the glyph keeps moving');
+    assert.equal(title(), undefined, 'and the host title stays untouched');
   } finally {
     harness.cleanup();
     tabRow.children.length = 0;
@@ -5211,8 +5211,8 @@ test('the band and the tab row derive the same phase from the same seed', () => 
   });
   api.apply(harness.ctx, {});
   try {
-    const title = button.children.find((child) => typeof child.hasAttribute === 'function' && child.hasAttribute('data-hotlist-tab-title'));
-    assert.ok(title !== undefined, 'the tab row wrapped the title for the same session');
+    const tabGlyph = button.children.find((child) => typeof child.hasAttribute === 'function' && child.hasAttribute('data-hotlist-tab-glyph'));
+    assert.ok(tabGlyph !== undefined, 'the tab row painted a glyph for the same session');
     const band = harness.entries.get(api.TOPBAR_ID).Component({});
     const chips = collect(band, (props) => typeof props['data-hotlist-chip'] === 'string');
     const chip = chips.find((node) => node.props['data-hotlist-chip'] === 'phase-a');
@@ -5220,7 +5220,7 @@ test('the band and the tab row derive the same phase from the same seed', () => 
     const chipTitle = collect(chip, (props) => typeof props['data-hotlist-chip-title'] === 'string')[0];
     assert.ok(chipTitle !== undefined, 'and its title is the row target');
     const phase = 'calc(-1 * ' + api.motionPhaseOf('phase-a', 'pending', 1200) + 'ms)';
-    assert.equal(title.style.animationDelay, phase, 'the tab seat opens at the shared phase');
+    assert.equal(tabGlyph.style.animationDelay, phase, 'the tab seat opens at the shared phase');
     assert.equal(chipTitle.props.style.animationDelay, phase, 'the pill opens at the same point');
   } finally {
     harness.cleanup();
