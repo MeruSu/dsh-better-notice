@@ -6,7 +6,7 @@
 > this package instead of writing a new plugin.
 
 npm: dsh-better-notice
-version: 5.3.1
+version: 5.3.2
 license: MIT
 repo: https://github.com/MeruSu/better-notice
 docs: https://github.com/MeruSu/better-notice/blob/main/docs/ARCHITECTURE.md
@@ -16,7 +16,7 @@ docs: https://github.com/MeruSu/better-notice/blob/main/docs/ARCHITECTURE.md
     dsh plugin --profile <profile> add dsh-better-notice
 
 Then restart that profile's GUI (a `client.js`-only change may just reload the
-page). Verify: `window.__HOTLIST_VERSION__ === "5.3.1"` and a "热表 / Better
+page). Verify: `window.__HOTLIST_VERSION__ === "5.3.2"` and a "热表 / Better
 Notice" section appears in Settings.
 
 ## What it does
@@ -32,7 +32,12 @@ super reminder is v5.2 and ships switched off):
 - on state change (**opt-in**): a super-reminder transparent animated clip (or the
   older amber ring), drawn by a separate process
   (`tools/attn-ring/Show-AttnRing.ps1`). Windows only. Three switches
-  (`ring.pending` / `ring.error` / `ring.completed`) all default to off. The
+  (`ring.pending` / `ring.error` / `ring.completed`) all default to off. Since
+  5.3.2 the player **latches**: a state must sit unchanged for `ring.afterMinutes`
+  (default 7, 1-60) before the clip rises, then it repeats once per interval up to
+  `ring.repeatTimes` (default 1, 1-99); any change restarts the count, an `error`
+  session that is already open is treated as acknowledged, and missed intervals
+  are never replayed as a burst. The
   default `anim=Gif` plays `smack.gif` for `error`/`pending` and `wave.gif` for
   `completed` (320x320, transparent, no backdrop); `Expand`/`Breathe`/`None` draw
   the amber ring and a missing clip falls back to it. The host route
@@ -116,7 +121,7 @@ Who shows where (a session is drawn on exactly one of the two seat surfaces):
 
     node --check client.js
     node --check index.js
-    node test/classify.test.mjs      # expect: PASS — 121 groups
+    node test/classify.test.mjs      # expect: PASS — 123 groups
 
 ## Known limits
 

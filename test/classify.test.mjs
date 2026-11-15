@@ -47,6 +47,7 @@ let rowWidth = 2000;
 
 function descendants(node) {
   const found = [];
+  if (Array.isArray(node.children) === false) return found;
   for (const child of node.children) {
     found.push(child);
     found.push(...descendants(child));
@@ -55,6 +56,7 @@ function descendants(node) {
 }
 
 function matchesSelector(element, selector) {
+  if (typeof element.hasAttribute !== 'function') return false;
   return selector.split(',').some((part) => {
     let rest = part.trim();
     let tag = null;
@@ -1313,6 +1315,7 @@ test('settings page', () => {
     'positions.tab', 'positions.topbar',
     'takeOverStatusDot',
     'ring.pending', 'ring.error', 'ring.completed',
+    'ring.afterMinutes', 'ring.repeatTimes',
   ]) {
     assert.equal(rows.includes(key), true, `missing row ${key}`);
   }
@@ -4185,7 +4188,11 @@ test('tab seats draw the same glyph and motion', () => {
     const glyph = button.children.find((child) => child.hasAttribute('data-hotlist-tab-glyph'));
     assert.ok(glyph !== undefined, 'the seat grew a glyph span');
     assert.equal(glyph.textContent, '📌', 'it draws the class glyph');
-    assert.equal(glyph.getAttribute('data-hotlist-motion'), 'bounce', 'and declares the class motion');
+    assert.equal(glyph.getAttribute('data-hotlist-motion'), 'none', 'a row target parks the glyph');
+    const title = button.children.find((child) => child.hasAttribute('data-hotlist-tab-title'));
+    assert.ok(title !== undefined, 'a row target wraps the title text');
+    assert.equal(title.getAttribute('data-hotlist-motion'), 'bounce', 'the title carries the class motion');
+    assert.equal(title.style.animationDelay, 'calc(-1 * ' + api.motionPhaseOf('tab-pin', 'pinned', 1200) + 'ms)', 'the seat opens the keyframe at the shared phase');
     assert.equal(textNode.textContent, '会话 tab-pin', 'the host text keeps only the title');
   } finally {
     harness.cleanup();
@@ -4488,72 +4495,174 @@ test('display metadata: the plugin list can show a name and an icon', () => {
 });
 
 /**
- * The full-screen ring: off at the factory, one request per class entry when
- * switched on, and the three script arguments come from the host's clamp.
+ * The full-screen ring: it waits, it repeats as configured, and it never nags
+ * about something you are already looking at. The old edge detector ("ring the
+ * moment a class is entered") is gone on purpose — a class that a person never
+ * noticed is the only reason to take the whole screen away.
  */
-test('ring player: off by default, one ring per entry when switched on', () => {
+test('ring player: waits out the configured minutes, repeats as configured', () => {
   const settings = api.sanitizeSettings(api.defaultSettings());
-  assert.deepEqual(settings.ring, { pending: false, error: false, completed: false }, 'every ring switch ships off');
+  assert.deepEqual(
+    settings.ring,
+    { pending: false, error: false, completed: false, afterMinutes: 7, repeatTimes: 1 },
+    'the factory waits seven minutes and rings once, with every switch off',
+  );
 
   const requests = [];
   const logs = [];
-  const player = api.createRingPlayer({
-    getSettings: () => settings,
+  const MINUTE = 60_000;
+  const t0 = Date.now();
+  const pending = { pendingInteraction: { kind: 'approval' } };
+  const boom = new Map([['a', 'boom']]);
+
+  /** One sync, as the host hands it over. `extra.errors` is how a failure arrives. */
+  const shot = (entries, extra = {}) => {
+    const ids = entries.map(([id]) => id);
+    return {
+      list: { ids, byId: Object.fromEntries(ids.map(([id]) => [id, session({ id })])) },
+      statuses: new Map(entries),
+      errors: extra.errors ?? new Map(),
+      completedAt: extra.completedAt ?? new Map(),
+      currentId: extra.currentId ?? null,
+    };
+  };
+  const make = (ring) => api.createRingPlayer({
+    getSettings: () => ({ ...settings, ring: { ...settings.ring, ...ring } }),
     request: (args) => requests.push(args),
     log: (...args) => logs.push(args.join(' ')),
   });
-  const shot = (entries) => {
-    const ids = entries.map(([id]) => id);
-    return {
-      list: { ids, byId: Object.fromEntries(ids.map((id) => [id, session({ id })])) },
-      statuses: new Map(entries),
-      errors: new Map(),
-      completedAt: new Map(),
-    };
+  /** Marks live in storage so a reload keeps counting; each case starts from nothing. */
+  const clearRingMarks = () => {
+    const stale = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      try {
+        const parsed = JSON.parse(storage.getItem(key));
+        if (parsed !== null && typeof parsed === 'object' && typeof parsed.marks === 'object') stale.push(key);
+      } catch {
+        /* not ours */
+      }
+    }
+    for (const key of stale) storage.removeItem(key);
+    requests.length = 0;
   };
-  const pending = { pendingInteraction: { kind: 'approval' } };
 
-  player.observe(shot([]), 1000);
-  player.observe(shot([['a', pending]]), 2000);
+  /** Off means off: the wait still runs, nothing asks the host. */
+  clearRingMarks();
+  const off = make({});
+  off.observe(shot([['a', pending]]), t0);
+  off.observe(shot([['a', pending]]), t0 + 30 * MINUTE);
   assert.equal(requests.length, 0, 'a switched-off class never asks the host for a ring');
   assert.equal(logs.includes('off pending'), true, 'the refusal is visible in the console');
 
-  /** Same edge detector as the sounds: arming first, then one request per entry. */
-  settings.ring.pending = true;
-  player.observe(shot([]), 3000);
-  player.observe(shot([['a', pending]]), 5000);
-  assert.equal(requests.length, 1, 'the switch alone does not ring; entering the class does');
-  player.observe(shot([['a', pending]]), 6000);
-  assert.equal(requests.length, 1, 'the same session in the same class is a repaint');
+  /** Entering a class is not enough any more: it has to sit there. */
+  clearRingMarks();
+  const player = make({ pending: true });
+  player.observe(shot([['a', pending]]), t0);
+  player.observe(shot([['a', pending]]), t0 + 7 * MINUTE - 1);
+  assert.equal(requests.length, 0, 'a millisecond short of the wait is still short');
+  player.observe(shot([['a', pending]]), t0 + 7 * MINUTE);
+  assert.equal(requests.length, 1, 'the reminder rises once the wait is up');
   assert.deepEqual(
     requests[0],
     { category: 'pending', seconds: 4, scope: 'Primary', anim: 'Gif' },
     'the request asks for a clip, not the amber ring',
   );
+  player.observe(shot([['a', pending]]), t0 + 40 * MINUTE);
+  assert.equal(requests.length, 1, 'the default is one reminder, then silence');
 
-  /** A cold player arms before it rings: the first sync after launch is never a reason to interrupt. */
-  const cold = api.createRingPlayer({
-    getSettings: () => ({ ...settings, ring: { pending: true, error: true, completed: true } }),
-    request: (args) => requests.push(args),
-    log: (...args) => logs.push(args.join(' ')),
-  });
-  cold.observe(shot([['c', pending]]), 9000);
-  assert.equal(requests.length, 1, 'the first sync of a fresh player only arms');
-  assert.equal(logs.includes('armed pending'), true);
+  /** Two repeats means n and 2n, never 3n. */
+  clearRingMarks();
+  const twice = make({ pending: true, repeatTimes: 2 });
+  twice.observe(shot([['a', pending]]), t0);
+  twice.observe(shot([['a', pending]]), t0 + 7 * MINUTE);
+  assert.equal(requests.length, 1, 'the first reminder is on schedule');
+  twice.observe(shot([['a', pending]]), t0 + 13 * MINUTE);
+  assert.equal(requests.length, 1, 'the second one waits for its own interval');
+  twice.observe(shot([['a', pending]]), t0 + 14 * MINUTE);
+  assert.equal(requests.length, 2, 'the second one arrives on time');
+  twice.observe(shot([['a', pending]]), t0 + 21 * MINUTE);
+  assert.equal(requests.length, 2, 'the configured count is the ceiling');
 
-  /** A failing host must not surface as an exception — the ring is optional. */
+  /** A laptop that slept through five intervals gets one reminder, not five. */
+  clearRingMarks();
+  const slept = make({ pending: true, repeatTimes: 5 });
+  slept.observe(shot([['a', pending]]), t0);
+  slept.observe(shot([['a', pending]]), t0 + 35 * MINUTE);
+  assert.equal(requests.length, 1, 'missed intervals are never replayed as a burst');
+  slept.observe(shot([['a', pending]]), t0 + 42 * MINUTE);
+  assert.equal(requests.length, 1, 'the count jumped past everything that expired');
+
+  /** A different class is a different wait. */
+  clearRingMarks();
+  const moved = make({ pending: true, error: true });
+  moved.observe(shot([['a', pending]]), t0);
+  moved.observe(shot([['a', pending]], { errors: boom }), t0 + 6 * MINUTE);
+  moved.observe(shot([['a', pending]], { errors: boom }), t0 + 12 * MINUTE);
+  assert.equal(requests.length, 0, 'switching class restarts the clock');
+  moved.observe(shot([['a', pending]], { errors: boom }), t0 + 13 * MINUTE);
+  assert.equal(requests.length, 1, 'the new class rings once it has waited its own seven');
+
+  /** A class that clears itself never rings. */
+  clearRingMarks();
+  const left = make({ pending: true });
+  left.observe(shot([['a', pending]]), t0);
+  left.observe(shot([['a', {}]]), t0 + 3 * MINUTE);
+  left.observe(shot([['a', {}]]), t0 + 30 * MINUTE);
+  assert.equal(requests.length, 0, 'opening a session clears the class and the mark with it');
+
+  /**
+   * The one class that does not clear itself: a failure raised by two windows on
+   * one session stays up forever, so opening that session is the acknowledgement.
+   */
+  clearRingMarks();
+  const acknowledged = make({ error: true, repeatTimes: 3 });
+  acknowledged.observe(shot([['a', {}]], { errors: boom, currentId: 'a' }), t0);
+  acknowledged.observe(shot([['a', {}]], { errors: boom }), t0 + 60 * MINUTE);
+  assert.equal(requests.length, 0, 'a failure you already opened is not news');
+
+  /**
+   * The finished seat drops out of the list after its TTL, which defaults to the
+   * same seven minutes as the wait. A reminder that never rang is still owed.
+   */
+  clearRingMarks();
+  const owedOne = make({ completed: true, afterMinutes: 7 });
+  owedOne.observe(shot([['c', {}]], { completedAt: new Map([['c', t0]]) }), t0 + MINUTE);
+  assert.equal(requests.length, 0, 'the wait is not over yet');
+  owedOne.observe(shot([['c', {}]]), t0 + 10 * MINUTE);
+  assert.equal(requests.length, 1, 'a seat that fell out of the list still gets its one reminder');
+  owedOne.observe(shot([['c', {}]]), t0 + 20 * MINUTE);
+  assert.equal(requests.length, 1, 'and only one');
+
+  /** A session that started running again is not owed anything. */
+  clearRingMarks();
+  const restarted = make({ pending: true });
+  restarted.observe(shot([['r', pending]]), t0);
+  restarted.observe(shot([['r', { running: true }]]), t0 + 3 * MINUTE);
+  restarted.observe(shot([['r', { running: true }]]), t0 + 30 * MINUTE);
+  assert.equal(requests.length, 0, 'a session that is working again is not waiting for you');
+
+  /** Two sessions due in the same tick: the host takes one window, the other keeps its place. */
+  clearRingMarks();
+  const queued = make({ pending: true });
+  queued.observe(shot([['a', pending], ['b', pending]]), t0);
+  queued.observe(shot([['a', pending], ['b', pending]]), t0 + 7 * MINUTE);
+  assert.equal(requests.length, 1, 'one reminder at a time');
+  queued.observe(shot([['a', pending], ['b', pending]]), t0 + 7 * MINUTE + 2000);
+  assert.equal(requests.length, 2, 'the reminder that was held back is not lost');
+
+  /** A host that cannot draw stays a console line — the ring is optional. */
+  clearRingMarks();
   const broken = api.createRingPlayer({
-    getSettings: () => ({ ...settings, ring: { pending: true, error: true, completed: true } }),
+    getSettings: () => ({ ...settings, ring: { ...settings.ring, pending: true } }),
     request: () => {
       throw new Error('offline');
     },
     log: (...args) => logs.push(args.join(' ')),
   });
-  broken.observe(shot([['b', pending]]), 100);
-  assert.doesNotThrow(() => broken.observe(shot([]), 200), 'an unarmed sync is silent');
-  assert.doesNotThrow(() => {
-    broken.observe(shot([['b', pending]]), 300);
-  }, 'a failed request stays a console line');
+  assert.doesNotThrow(() => broken.observe(shot([['b', pending]]), t0), 'a failing host never throws');
+  assert.doesNotThrow(() => broken.observe(shot([['b', pending]]), t0 + 7 * MINUTE), 'a failed request stays a console line');
+  clearRingMarks();
 });
 
 /**
@@ -5045,6 +5154,79 @@ test('audio config: the prompt never leaks a placeholder or a home directory', (
   const noConfig = api.audioPromptText(zh, null);
   assert.equal(noConfig.includes('%USERPROFILE%'), true, 'the fallback path is spelled out');
   assert.equal(noConfig.includes('{{'), false);
+});
+
+// 97. The tab seat moves what motionTarget says: title for a row target, glyph for a glyph target.
+test('tab seats move the title for a row target and the glyph for a glyph target', () => {
+  tabRow.children.length = 0;
+  const button = el('button');
+  button.setAttribute('role', 'tab');
+  const textNode = { nodeType: 3, textContent: '会话 tab-pin' };
+  button.childNodes = [textNode];
+  tabRow.appendChild(button);
+  const ids = ['tab-pin'];
+  const byId = { 'tab-pin': session({ id: 'tab-pin', displayTitle: '会话 tab-pin', updatedAt: NOW }) };
+  api.writeSettings({ categories: { pinned: { order: 5 } } });
+  const harness = createCtx({
+    list: { ids, byId },
+    statuses: new Map(),
+    groups: { items: [{ workspaceId: 'w', sessionIds: ids }], archivedSessionIds: [], pinnedSessionIds: ids, phase: 'ready' },
+  });
+  api.apply(harness.ctx, {});
+  try {
+    const asElement = (child) => typeof child.hasAttribute === 'function';
+    const glyph = () => button.children.find((child) => asElement(child) && child.hasAttribute('data-hotlist-tab-glyph'));
+    const title = () => button.children.find((child) => asElement(child) && child.hasAttribute('data-hotlist-tab-title'));
+    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'none', 'row target parks the glyph');
+    assert.equal(title().getAttribute('data-hotlist-motion'), 'bounce', 'and the wrapped title moves');
+    api.writeSettings({ categories: { pinned: { glyph: { ...api.readSettings().categories.pinned.glyph, motionTarget: 'glyph' } } } });
+    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'bounce', 'a glyph target moves the glyph');
+    assert.equal(title(), undefined, 'and never wraps the title');
+    api.writeSettings({ categories: { pinned: { glyph: { ...api.readSettings().categories.pinned.glyph, motionTarget: 'row' } } } });
+    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'none', 'back to row: the glyph parks again');
+    assert.ok(title() !== undefined, 'and the title wraps again');
+  } finally {
+    harness.cleanup();
+    tabRow.children.length = 0;
+    api.resetSettings();
+  }
+});
+
+// 98. One seed, two surfaces: the band pill and the tab seat open the same keyframe point.
+test('the band and the tab row derive the same phase from the same seed', () => {
+  tabRow.children.length = 0;
+  const button = el('button');
+  button.setAttribute('role', 'tab');
+  const textNode = { nodeType: 3, textContent: '会话 phase-a' };
+  button.childNodes = [textNode];
+  tabRow.appendChild(button);
+  const ids = ['phase-a'];
+  const byId = { 'phase-a': session({ id: 'phase-a', displayTitle: '会话 phase-a', updatedAt: NOW }) };
+  enableTopbar();
+  api.writeSettings({ categories: { pending: { surfaces: { ...DEFAULTS.categories.pending.surfaces, tab: true } } } });
+  const harness = createCtx({
+    list: { ids, byId },
+    statuses: new Map([['phase-a', { pendingInteraction: { kind: 'approval' } }]]),
+    groups: { items: [{ workspaceId: 'w', sessionIds: ids }], archivedSessionIds: [] },
+  });
+  api.apply(harness.ctx, {});
+  try {
+    const title = button.children.find((child) => typeof child.hasAttribute === 'function' && child.hasAttribute('data-hotlist-tab-title'));
+    assert.ok(title !== undefined, 'the tab row wrapped the title for the same session');
+    const band = harness.entries.get(api.TOPBAR_ID).Component({});
+    const chips = collect(band, (props) => typeof props['data-hotlist-chip'] === 'string');
+    const chip = chips.find((node) => node.props['data-hotlist-chip'] === 'phase-a');
+    assert.ok(chip !== undefined, 'the band holds the same session');
+    const chipTitle = collect(chip, (props) => typeof props['data-hotlist-chip-title'] === 'string')[0];
+    assert.ok(chipTitle !== undefined, 'and its title is the row target');
+    const phase = 'calc(-1 * ' + api.motionPhaseOf('phase-a', 'pending', 1200) + 'ms)';
+    assert.equal(title.style.animationDelay, phase, 'the tab seat opens at the shared phase');
+    assert.equal(chipTitle.props.style.animationDelay, phase, 'the pill opens at the same point');
+  } finally {
+    harness.cleanup();
+    tabRow.children.length = 0;
+    api.resetSettings();
+  }
 });
 
 console.log(`PASS — ${groups} groups`);

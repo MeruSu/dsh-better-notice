@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.3.1';
+    const VERSION = '5.3.2';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -268,6 +268,17 @@ window.__ModuleLoader__.load({
     const RING_OPTIONS = { seconds: 4, scope: 'Primary', anim: 'Gif' };
     /** Two rings closer than this are one event: the host enforces the same idea. */
     const RING_THROTTLE_MS = 1500;
+    /**
+     * When the reminder rises. A class has to *sit* for `afterMinutes` before it
+     * counts as unconfirmed; `repeatTimes` then repeats it every further interval.
+     * Both bounds are the settings schema, not the UI: a stored 0.5 minute or a
+     * 400-times loop has to come back as something a person can watch.
+     */
+    const RING_WAIT = { min: 1, max: 60, fallback: 7 };
+    const RING_TIMES = { min: 1, max: 99, fallback: 1 };
+    /** Marks survive a reload so the wait keeps counting; a day is the hard ceiling. */
+    const RING_STATE_KEY = 'dsh.hotlist.ringMarks.v1';
+    const RING_MARK_TTL_MS = 24 * 60 * 60 * 1000;
     const CHOICE_LIMIT = 256;
     /**
      * Which surface each class belongs to. The split is the point of the feature: the band is
@@ -899,7 +910,18 @@ window.__ModuleLoader__.load({
          * factory: taking over the whole screen is the user's decision, never a
          * surprise from an upgrade.
          */
-        ring: { pending: false, error: false, completed: false },
+        /**
+       * The full-screen ring: one switch per class, plus the wait that decides when
+       * a class counts as unconfirmed and how many times it may repeat. All three
+       * switches are off, so a fresh install never takes the screen away.
+       */
+      ring: {
+        pending: false,
+        error: false,
+        completed: false,
+        afterMinutes: RING_WAIT.fallback,
+        repeatTimes: RING_TIMES.fallback,
+      },
         /** Smart audio: cue only while the default output device is headphones. */
         audio: { smart: false },
         pinned: { maxSeats: PINNED_SEATS.fallback },
@@ -1164,11 +1186,15 @@ window.__ModuleLoader__.load({
       'settings.sound.preview': '试听',
       'settings.sound.previewHint': '点一下立刻播一条；浏览器可能拦截自动播放。',
       'settings.ring.pending': '有待处理时',
-      'settings.ring.pendingHint': '有会话在等你批准或回答时，整块屏幕升起一段动画提醒。',
+      'settings.ring.pendingHint': '有会话在等你批准或回答，停够下面的分钟数还没人管就提醒你。',
       'settings.ring.error': '有报错时',
-      'settings.ring.errorHint': '有会话这一轮失败时，整块屏幕提醒一次。',
+      'settings.ring.errorHint': '有会话这一轮失败，停够下面的分钟数还挂在那儿就提醒你。',
       'settings.ring.completed': '有会话跑完时',
-      'settings.ring.completedHint': '有会话刚结束时，整块屏幕提醒一次。',
+      'settings.ring.completedHint': '有会话跑完了，停够下面的分钟数还没打开就提醒你。',
+      'settings.ring.after': '超过多久未确认（分钟）',
+      'settings.ring.afterHint': '这三种状态要停够这么多分钟没变化才弹；一变就重新计时。',
+      'settings.ring.times': '最多提醒几次',
+      'settings.ring.timesHint': '每隔上面的分钟数再来一次，用完就不再多打扰。',
       'settings.audio.smart': '只在耳机时响',
       'settings.audio.smartHint': '只有当前默认输出设备是耳机时才播提示音；不知道输出设备时不播。',
       'settings.audio.title': '设备清单',
@@ -1380,11 +1406,15 @@ window.__ModuleLoader__.load({
       'settings.sound.preview': 'Preview',
       'settings.sound.previewHint': 'Clicking plays one now; the browser may still block autoplay.',
       'settings.ring.pending': 'When something waits',
-      'settings.ring.pendingHint': 'A short animation rises over the whole screen while a session waits for your approval or answer.',
+      'settings.ring.pendingHint': 'A session is waiting for your approval or answer and has been left alone for the minutes below.',
       'settings.ring.error': 'On a failure',
-      'settings.ring.errorHint': 'The whole screen reminds you once when a session fails its turn.',
+      'settings.ring.errorHint': 'A session failed and has sat there for the minutes below.',
       'settings.ring.completed': 'When a run finishes',
-      'settings.ring.completedHint': 'The whole screen reminds you once when a session just finished.',
+      'settings.ring.completedHint': 'A session finished and has not been opened for the minutes below.',
+      'settings.ring.after': 'Wait before it rises (minutes)',
+      'settings.ring.afterHint': 'The reminder waits this long while the state sits unchanged; any change restarts the count.',
+      'settings.ring.times': 'How many times at most',
+      'settings.ring.timesHint': 'It repeats every interval above, then stops bothering you.',
       'settings.audio.smart': 'Headphones only',
       'settings.audio.smartHint': 'Only plays cues while the default output device is headphones; unknown output stays silent.',
       'settings.audio.title': 'Device list',
@@ -1832,6 +1862,17 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         for (const category of RING_CATEGORIES) {
           if (typeof raw.ring[category] === 'boolean') next.ring[category] = raw.ring[category];
         }
+        /**
+         * Neither field has an older factory value to follow: they only have a range.
+         * An out-of-range number is clamped rather than dropped, so a hand-edited 0
+         * comes back as the shortest legal wait instead of silently becoming 7.
+         */
+        if (typeof raw.ring.afterMinutes === 'number' && Number.isFinite(raw.ring.afterMinutes)) {
+          next.ring.afterMinutes = clamp(Math.round(raw.ring.afterMinutes), RING_WAIT.min, RING_WAIT.max);
+        }
+        if (typeof raw.ring.repeatTimes === 'number' && Number.isFinite(raw.ring.repeatTimes)) {
+          next.ring.repeatTimes = clamp(Math.round(raw.ring.repeatTimes), RING_TIMES.min, RING_TIMES.max);
+        }
       }
       if (isPlainObject(raw.audio)) {
         if (typeof raw.audio.smart === 'boolean') next.audio.smart = raw.audio.smart;
@@ -1957,6 +1998,18 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         hash = Math.imul(hash, 0x01000193);
       }
       return hash >>> 0;
+    }
+
+    /**
+     * One deterministic start offset per (sessionId, category): the band and the
+     * tab row open the same keyframe at the same point, so the two surfaces of
+     * one session always look like one animation. `frequency` says when a motion
+     * may run, `motionTarget` says which node moves, and this says where in the
+     * cycle it starts; the three never overlap.
+     */
+    function motionPhaseOf(sessionId, category, durationMs) {
+      if (Number.isFinite(durationMs) === false || durationMs <= 0) return 0;
+      return fnv1a(String(sessionId) + '|' + String(category)) % Math.round(durationMs);
     }
 
     /** A pool index from a seed: same seed, same picture, so a repaint never flickers. */
@@ -2165,7 +2218,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         'overlay.side', 'overlay.fallbackImage', 'overlay.sizeMin', 'overlay.sizeMax',
         'collect.completedTtlMs', 'collect.recentWindowMinutes',
         'sound.volume', 'pinned.maxSeats',
-        'ring.pending', 'ring.error', 'ring.completed',
+        'ring.pending', 'ring.error', 'ring.completed', 'ring.afterMinutes', 'ring.repeatTimes',
         'audio.smart',
       ]);
       for (const category of CATEGORY_IDS) {
@@ -4867,6 +4920,30 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         switchRow('ring.pending', t('settings.ring.pending'), t('settings.ring.pendingHint'), settings.ring.pending === true, () => patch({ ring: { ...settings.ring, pending: settings.ring.pending !== true } })),
         switchRow('ring.error', t('settings.ring.error'), t('settings.ring.errorHint'), settings.ring.error === true, () => patch({ ring: { ...settings.ring, error: settings.ring.error !== true } })),
         switchRow('ring.completed', t('settings.ring.completed'), t('settings.ring.completedHint'), settings.ring.completed === true, () => patch({ ring: { ...settings.ring, completed: settings.ring.completed !== true } })),
+        h('div', { key: 'ringWait', className: 'hl-row', 'data-hotlist-row': 'ring.afterMinutes' }, [
+          h('div', { key: 'main', className: 'hl-rowMain' }, [
+            h('span', { key: 'title', className: 'hl-rowTitle' }, t('settings.ring.after')),
+            h('span', { key: 'hint', className: 'hl-rowHint' }, t('settings.ring.afterHint')),
+          ]),
+          h('div', { key: 'control', className: 'hl-fieldControl' }, numberStepper(
+            settings.ring.afterMinutes,
+            RING_WAIT.min,
+            RING_WAIT.max,
+            (value) => patch({ ring: { ...settings.ring, afterMinutes: value } }),
+          )),
+        ]),
+        h('div', { key: 'ringTimes', className: 'hl-row', 'data-hotlist-row': 'ring.repeatTimes' }, [
+          h('div', { key: 'main', className: 'hl-rowMain' }, [
+            h('span', { key: 'title', className: 'hl-rowTitle' }, t('settings.ring.times')),
+            h('span', { key: 'hint', className: 'hl-rowHint' }, t('settings.ring.timesHint')),
+          ]),
+          h('div', { key: 'control', className: 'hl-fieldControl' }, numberStepper(
+            settings.ring.repeatTimes,
+            RING_TIMES.min,
+            RING_TIMES.max,
+            (value) => patch({ ring: { ...settings.ring, repeatTimes: value } }),
+          )),
+        ]),
         switchRow('audio.smart', t('settings.audio.smart'), t('settings.audio.smartHint'), settings.audio.smart === true, () => patch({ audio: { ...settings.audio, smart: settings.audio.smart !== true } })),
         audioConfigRow(),
       ]);
@@ -5874,20 +5951,61 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     }
 
     /**
-     * The one-shot full-screen ring. Same edge detector as the sounds — a ring
-     * belongs to the moment a class is entered, not to every repaint — with two
-     * extra gates: the class has to be switched on, and the request is a
-     * `fetch` to the host (the browser cannot start a process, and this half
-     * never tries). Every failure is a `console.debug`: a profile without
-     * `pwsh` must keep working exactly as before.
+     * The delayed full-screen ring.
+     *
+     * A ring no longer belongs to the moment a class is *entered*: it belongs to a
+     * class that sits there. Every urgent session gets a mark the first time it is
+     * seen in one of the three classes, and the ring rises only once that mark has
+     * aged `afterMinutes` without the class changing — then again every further
+     * interval, up to `repeatTimes`.
+     *
+     * Two ways out. Leaving the class drops the mark on the next sync, which is what
+     * happens to `pending` and `completed` the moment a person opens the session.
+     * `error` is the exception: two windows on one session keep the same failure up
+     * forever, so opening that session acknowledges the mark instead.
+     *
+     * Marks are persisted, so a reload keeps counting instead of restarting at zero.
+     * Expired intervals are never replayed as a burst: a laptop that slept through
+     * ten of them rings once and the count jumps straight past what expired.
      */
     function createRingPlayer(options) {
       const getSettings = options.getSettings;
       const request = options.request;
       const log = typeof options.log === 'function' ? options.log : () => {};
-      const seen = new Map();
-      let armed = false;
+      /** sessionId -> { category, since, fired, acked } */
+      const markStore = readRingMarks();
       let lastAt = -Infinity;
+
+      function readRingMarks() {
+        const stored = readStored(RING_STATE_KEY);
+        /**
+         * `marks`, not `entries`: the finished-session record already owns that word,
+         * and any reader that identifies it by shape has to keep finding only one file.
+         */
+        const saved = isPlainObject(stored?.marks) ? stored.marks : {};
+        const map = new Map();
+        const now = Date.now();
+        for (const [sessionId, entry] of Object.entries(saved)) {
+          if (typeof sessionId !== 'string' || sessionId === '') continue;
+          if (isPlainObject(entry) === false) continue;
+          if (RING_CATEGORIES.includes(entry.category) === false) continue;
+          if (typeof entry.since !== 'number' || Number.isFinite(entry.since) === false) continue;
+          if (now - entry.since > RING_MARK_TTL_MS) continue;
+          const fired = typeof entry.fired === 'number' && Number.isFinite(entry.fired) ? Math.max(0, Math.round(entry.fired)) : 0;
+          map.set(sessionId, { category: entry.category, since: entry.since, fired, acked: entry.acked === true });
+        }
+        return map;
+      }
+
+      function flushRingMarks() {
+        const marks = {};
+        for (const [sessionId, mark] of markStore) marks[sessionId] = mark;
+        try {
+          localStorage.setItem(RING_STATE_KEY, JSON.stringify({ version: SETTINGS_VERSION, marks }));
+        } catch {
+          /* a full quota only costs the next reload's countdown, never the running plugin */
+        }
+      }
 
       /** A warning is one clip, so the trigger class picks which one plays. */
       function clipOf(category) {
@@ -5917,7 +6035,13 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
 
       /** Only the three urgent classes: a ring never interrupts for running or idle. */
       function observe(snapshot, now) {
+        const settings = getSettings();
+        const waitMs = clamp(Math.round(Number(settings.ring?.afterMinutes) || RING_WAIT.fallback), RING_WAIT.min, RING_WAIT.max) * 60000;
+        const times = clamp(Math.round(Number(settings.ring?.repeatTimes) || RING_TIMES.fallback), RING_TIMES.min, RING_TIMES.max);
         const byId = snapshot.list.byId;
+        const currentId = snapshot.currentId ?? null;
+        let changed = false;
+
         for (const sessionId of snapshot.list.ids) {
           const session = byId[sessionId];
           if (session === undefined || session.blank === true) continue;
@@ -5928,21 +6052,71 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           else if (status?.pendingInteraction != null) category = 'pending';
           else {
             const at = snapshot.completedAt.get(sessionId);
-            if (at !== undefined && now - at <= getSettings().collect.completedTtlMs) category = 'completed';
+            if (at !== undefined && now - at <= settings.collect.completedTtlMs) category = 'completed';
           }
-          if (category === undefined || RING_CATEGORIES.includes(category) === false) {
-            seen.delete(sessionId);
+          /** The mark this session already carries, if any. */
+          const owed = markStore.get(sessionId);
+          if (category === undefined) {
+            /**
+             * A finished seat leaves the list when its TTL runs out — which can happen
+             * *before* the wait is over (both default to seven minutes). A mark that
+             * never rang is still owed its one reminder, so hold it while the session
+             * shows no new reason to forget it: not running, not open in the main view.
+             */
+            const stillOwed = owed !== void 0
+              && owed.category === 'completed'
+              && owed.fired === 0
+              && owed.acked !== true
+              && status?.running !== true
+              && (session.retainedBy?.mainView ?? 0) === 0;
+            if (stillOwed === false) {
+              if (markStore.delete(sessionId) === true) changed = true;
+              continue;
+            }
+            category = 'completed';
+          }
+          let mark = owed;
+          if (mark === void 0 || mark.category !== category) {
+            mark = { category, since: now, fired: 0, acked: false };
+            markStore.set(sessionId, mark);
+            changed = true;
+          }
+          /** A failure can outlive every click, so looking at that one is the acknowledgement. */
+          if (category === 'error' && currentId === sessionId) {
+            if (mark.acked !== true) {
+              mark.acked = true;
+              changed = true;
+            }
             continue;
           }
-          if (seen.get(sessionId) === category) continue;
-          seen.set(sessionId, category);
-          if (armed) ring(category, now);
-          else log('armed', category);
+          if (mark.acked === true) continue;
+          if (mark.fired >= times) continue;
+          if (now - mark.since < waitMs * (mark.fired + 1)) continue;
+          /**
+           * The switch is off: nothing to draw, but the interval still passed, so it
+           * is spent. Logging once per interval rather than once per tick keeps the
+           * console readable when a class is left waiting for hours.
+           */
+          if (settings.ring?.[category] !== true) {
+            log('off', category);
+            mark.fired = Math.min(times, Math.floor((now - mark.since) / waitMs));
+            changed = true;
+            continue;
+          }
+          /** A throttled or failed request leaves `fired` alone, so the next tick retries. */
+          if (ring(category, now) !== true) continue;
+          mark.fired = Math.min(times, Math.max(mark.fired + 1, Math.floor((now - mark.since) / waitMs)));
+          changed = true;
+          log('scheduled', sessionId, category, mark.fired);
         }
-        for (const sessionId of [...seen.keys()]) {
-          if (byId[sessionId] === undefined) seen.delete(sessionId);
+
+        for (const sessionId of [...markStore.keys()]) {
+          if (byId[sessionId] === void 0) {
+            markStore.delete(sessionId);
+            changed = true;
+          }
         }
-        armed = true;
+        if (changed) flushRingMarks();
       }
 
       return { observe };
@@ -6443,6 +6617,12 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
        * span. A host re-render that drops the span is repaired on the next tick.
        */
       const TAB_GLYPH_ATTR = 'data-hotlist-tab-glyph';
+      /**
+       * The title span a `row` target animates instead of the glyph: the host
+       * text node rides inside it, so `hl-text-*` (translate + opacity only)
+       * has a real text node to move. `glyph` targets never create it.
+       */
+      const TAB_TITLE_ATTR = 'data-hotlist-tab-title';
       const TAB_STYLE_ATTR = 'data-hotlist-tab-style';
       const TAB_CSS = [
         '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="spin"]{animation:hl-spin 2.4s linear infinite}',
@@ -6450,12 +6630,20 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="bounce"]{animation:hl-bounce 1.2s ease-in-out infinite}',
         '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="blink"]{animation:hl-blink 1.2s ease-in-out infinite}',
         '[' + TAB_GLYPH_ATTR + ']{display:inline-block;margin-right:4px}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="spin"]{animation:hl-text-spin 2.4s linear infinite}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="pulse"]{animation:hl-text-pulse 1.6s ease-in-out infinite}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="bounce"]{animation:hl-text-bounce 1.2s ease-in-out infinite}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="blink"]{animation:hl-text-blink 1.2s ease-in-out infinite}',
         '@keyframes hl-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
         '@keyframes hl-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}',
         '@keyframes hl-bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}70%{transform:translateY(0)}90%{transform:translateY(-1.5px)}}',
         '@keyframes hl-blink{0%,100%{opacity:1}50%{opacity:.35}}',
-        'html[' + REDUCE_MOTION_ATTR + '] [' + TAB_GLYPH_ATTR + ']{animation:none !important}',
-        '@media (prefers-reduced-motion:reduce){[' + TAB_GLYPH_ATTR + ']{animation:none !important}}',
+        '@keyframes hl-text-spin{0%,100%{opacity:1;transform:translateY(0)}25%{opacity:.7;transform:translateY(-1px)}75%{opacity:.85;transform:translateY(1px)}}',
+        '@keyframes hl-text-pulse{0%,100%{opacity:1;transform:translateX(0)}50%{opacity:.55;transform:translateX(1px)}}',
+        '@keyframes hl-text-bounce{0%,100%{opacity:1;transform:translateY(0)}40%{opacity:.45;transform:translateY(-2px)}70%{opacity:1;transform:translateY(0)}90%{opacity:.9;transform:translateY(-1px)}}',
+        '@keyframes hl-text-blink{0%,100%{opacity:1;transform:none}50%{opacity:.35}}',
+        'html[' + REDUCE_MOTION_ATTR + '] [' + TAB_GLYPH_ATTR + '],html[' + REDUCE_MOTION_ATTR + '] [' + TAB_TITLE_ATTR + ']{animation:none !important}',
+        '@media (prefers-reduced-motion:reduce){[' + TAB_GLYPH_ATTR + '],[' + TAB_TITLE_ATTR + ']{animation:none !important}}',
       ].join('');
 
       function injectTabCss() {
@@ -6496,12 +6684,43 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         if (row === null) return;
         const { emoji: shown, title: wanted } = labelParts(t, seat, settings);
         const token = seat.token ?? null;
-        const moved = shown === '' ? { motion: 'none' } : tokenMotion(settings, token);
+        const category = seat.category ?? (token === null ? 'running' : (CATEGORY_OF_TOKEN[token] ?? 'running'));
+        const moved = shown === '' || token === null ? { motion: 'none', motionTarget: 'glyph' } : tokenMotion(settings, token);
+        /**
+         * Same rule as the band and the sidebar: `motionTarget` decides which
+         * node moves, `frequency` decides when. A row target wraps the title
+         * text and animates that; the glyph stays painted but still.
+         */
+        const moveTitle = moved.motion !== 'none' && moved.motionTarget === 'row';
+        const phase = moveTitle || moved.motion !== 'none'
+          ? motionPhaseOf(seat.sessionId, category, MOTION_MS[moved.motion] ?? 1200)
+          : 0;
+        const delay = moved.motion !== 'none' ? 'calc(-1 * ' + phase + 'ms)' : void 0;
         for (const button of row.querySelectorAll('[role="tab"]')) {
           const textNode = findTabLabelTextNode(button, wanted);
           if (textNode === null) continue;
-          const parent = textNode.parentElement ?? button;
+          const holder = textNode.parentElement ?? button;
+          const parent = holder !== null && typeof holder.getAttribute === 'function' && holder.hasAttribute(TAB_TITLE_ATTR)
+            ? (holder.parentElement ?? button)
+            : holder;
           let glyph = parent.querySelector('[' + TAB_GLYPH_ATTR + ']');
+          let titleSpan = parent.querySelector('[' + TAB_TITLE_ATTR + ']');
+          if (moveTitle === true) {
+            if (titleSpan === null) {
+              titleSpan = document.createElement('span');
+              titleSpan.setAttribute(TAB_TITLE_ATTR, '');
+              parent.insertBefore(titleSpan, textNode);
+              titleSpan.appendChild(textNode);
+            }
+            if (titleSpan.getAttribute('data-hotlist-motion') !== moved.motion) titleSpan.setAttribute('data-hotlist-motion', moved.motion);
+            if (titleSpan.style.animationDelay !== delay) titleSpan.style.animationDelay = delay;
+          } else if (titleSpan !== null) {
+            /** Back to a glyph target: unwrap the title so the host owns it again. */
+            const text = titleSpan.childNodes?.[0] ?? titleSpan.children?.[0] ?? null;
+            if (text !== null) parent.insertBefore(text, titleSpan);
+            titleSpan.remove();
+            titleSpan = null;
+          }
           if (shown === '') {
             if (glyph !== null) glyph.remove();
             /** Text mode still has to strip the title's own emoji — we own the row. */
@@ -6514,7 +6733,9 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             parent.insertBefore(glyph, textNode);
           }
           if (glyph.textContent !== shown) glyph.textContent = shown;
-          if (glyph.getAttribute('data-hotlist-motion') !== moved.motion) glyph.setAttribute('data-hotlist-motion', moved.motion);
+          const glyphMotion = moveTitle === true ? 'none' : moved.motion;
+          if (glyph.getAttribute('data-hotlist-motion') !== glyphMotion) glyph.setAttribute('data-hotlist-motion', glyphMotion);
+          if (glyph.style.animationDelay !== delay) glyph.style.animationDelay = delay;
           /** One emoji, never two: the host text keeps only the title. */
           if (textNode.textContent !== wanted) textNode.textContent = wanted;
           return;
@@ -6531,6 +6752,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         const row = document.querySelector('[data-conversation-tabs]');
         if (row !== null) {
           for (const glyph of row.querySelectorAll('[' + TAB_GLYPH_ATTR + ']')) glyph.remove();
+          for (const title of row.querySelectorAll('[' + TAB_TITLE_ATTR + ']')) title.remove();
         }
         removeTabCss();
         if (tabTimer !== null) {
@@ -6868,11 +7090,15 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           attrs['data-hotlist-chip-target'] = chip.motionTarget === 'row' ? 'row' : 'emoji';
         }
         if (burst !== void 0) attrs['data-hotlist-chip-burst'] = '';
+        /** Same deterministic phase as the tab row: both open the keyframe at the same point. */
+        const delay = chip.motion !== void 0 && chip.motion !== 'none'
+          ? 'calc(-1 * ' + motionPhaseOf(chip.id, chip.category, MOTION_MS[chip.motion] ?? 1200) + 'ms)'
+          : void 0;
         return h('button', attrs, [
           chip.emoji === '' || chip.emoji === void 0
             ? null
-            : h('span', { key: 'glyph', 'data-hotlist-chip-emoji': '', style: { fontSize: '14px', lineHeight: '24px' } }, chip.emoji),
-          h('span', { key: 'title', 'data-hotlist-chip-title': '', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' } }, chipLabelOf(chip)),
+            : h('span', { key: 'glyph', 'data-hotlist-chip-emoji': '', style: { fontSize: '14px', lineHeight: '24px', ...(chip.motionTarget !== 'row' && delay !== void 0 ? { animationDelay: delay } : {}) } }, chip.emoji),
+          h('span', { key: 'title', 'data-hotlist-chip-title': '', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', ...(chip.motionTarget === 'row' && delay !== void 0 ? { animationDelay: delay } : {}) } }, chipLabelOf(chip)),
         ]);
       }
 
@@ -7394,6 +7620,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         ring?.observe({
           list: snapshot.list,
           statuses: snapshot.statuses,
+          currentId: snapshot.currentId,
           errors,
           completedAt,
         }, now);
@@ -7846,6 +8073,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       assetBytes,
       trimAssetBudget,
       fnv1a,
+      motionPhaseOf,
       pickIndex,
       randomIndex,
       pickPopoutArt,

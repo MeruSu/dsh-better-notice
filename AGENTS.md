@@ -3,7 +3,7 @@
 This file is for AI coding agents. It says what this plugin already does, so you
 do not rebuild it, and what will break the host if you get it wrong.
 
-- Package: `dsh-better-notice` · version `5.3.1` · MIT
+- Package: `dsh-better-notice` · version `5.3.2` · MIT
 - Host: DeepSeek Harness (DSH) Web UI
 - One command to install: `dsh plugin --profile <profile> add dsh-better-notice`
 - One-page summary for scrapers: [llms.txt](llms.txt) · human docs: [README.md](README.md)
@@ -20,11 +20,11 @@ finished, which one failed.
 
 | Surface | What you see | Where the code lives |
 |---|---|---|
-| Conversation tab row | one tab seat per hot session; click switches to it | `mountTabSeats` (`client.js:6391`) |
-| Left session sidebar | one glyph before each row title, optionally animated | `createSidebarAdapter` / `sidebarStateOf` (`client.js:3557` / `2955`) |
-| Window top bar (**Windows desktop**, new in v5) | a row of session pills in the 40 px title strip, next to the tab row | `mountTopbar` (`client.js:7087`) |
-| On state change | a sound and/or a popout picture | `createSoundPlayer` (`client.js:5735`) · `mountPopout` (`client.js:5151`) |
-| On state change (**opt-in**) | a super-reminder clip (or the older amber ring), drawn by a separate process | `createRingPlayer` (`client.js:5884`) · `serveRing` (`index.js:167`) |
+| Conversation tab row | one tab seat per hot session; click switches to it | `mountTabSeats` (`client.js:6565`) |
+| Left session sidebar | one glyph before each row title, optionally animated | `createSidebarAdapter` / `sidebarStateOf` (`client.js:3610` / `2955`) |
+| Window top bar (**Windows desktop**, new in v5) | a row of session pills in the 40 px title strip, next to the tab row | `mountTopbar` (`client.js:7313`) |
+| On state change | a sound and/or a popout picture | `createSoundPlayer` (`client.js:5812`) · `mountPopout` (`client.js:5228`) |
+| On state change (**opt-in**) | a super-reminder clip (or the older amber ring), drawn by a separate process | `createRingPlayer` (`client.js:5971`) · `serveRing` (`index.js:167`) |
 
 **Who is drawn where** (`buildSeatPlan()` takes a `surface` argument): `error` /
 `pending` / `completed` go to the window top bar, `pinned` / `idle` / `running`
@@ -48,8 +48,8 @@ error  >  pending  >  completed  >  running  >  pinned  >  idle
 | `pinned` | pinned **in the host's own UI** — read from `pinnedSessionIds`, never stored by this plugin | no | — |
 | `idle` | active within the global recent window | no | — |
 
-The two functions that decide this are `classify()` (`client.js:2646-2704`) and
-`sidebarStateOf()` (`client.js:3519-3555`). They share the same order but apply
+The two functions that decide this are `classify()` (`client.js:2699-2757`) and
+`sidebarStateOf()` (`client.js:3572-3608`). They share the same order but apply
 different extra conditions (the sidebar has an error TTL and honours
 `completionUnread`). Change both, or you get two different answers for the same
 session on two surfaces.
@@ -57,14 +57,14 @@ session on two surfaces.
 **Default display order** (`CATEGORY_ORDER`, `client.js:185`):
 `error 10 · pending 10 · pinned 60 · completed 20 · running 30 · idle 50`.
 
-**Hard row cap:** `PLAN_MAX_ROWS = 37` (`client.js:312`). Rows past it are cut
+**Hard row cap:** `PLAN_MAX_ROWS = 37` (`client.js:323`). Rows past it are cut
 from the tail — the priority head always survives. `plan.overflow` reports how
 many were dropped.
 
-**Settings are never overwritten.** `sanitizeSettings()` (`client.js:1741`) is
+**Settings are never overwritten.** `sanitizeSettings()` (`client.js:1771`) is
 pure and falls back per field, never wholesale. Unknown keys go to
 `PRESERVED_KEY` (`client.js:169`) and come back on the next read; out-of-range
-values come back too (`outOfRangeOf`, `client.js:2256`); the last five writes
+values come back too (`outOfRangeOf`, `client.js:2309`); the last five writes
 are kept as a rolling backup ring under `BACKUP_KEY` (`client.js:171`,
 `BACKUP_LIMIT = 5`). There is deliberately **no `SETTINGS_VERSION` bump** for
 cosmetic changes — a version bump means writing a migration, and a wrong
@@ -77,7 +77,7 @@ of the four 5.3.1 default moves (`maxSeats 6`, `running.surfaces.tab false`,
 `pinned.sound.enabled true`, any `topbar.customScope` entry `true` except
 `pinned`) — is not a user choice, so it follows the current default
 (`LEGACY_VALUES`, `client.js:214`). A value the user actually picked is recorded
-in `choices` (`client.js:2531`, written by `writeSettings()` from the incoming
+in `choices` (`client.js:2584`, written by `writeSettings()` from the incoming
 patch only) and the preset rule never touches it; `resetSettings()` clears the
 map.
 
@@ -130,7 +130,7 @@ authenticated** — publish public assets only, never user data.
 
 ```js
 window.__HOTLIST__ = {
-  version,                                              // "5.3.1"
+  version,                                              // "5.3.2"
   settings: { get, set, reset, subscribe, backups, restore },
   assets:   { add, list, clear, preview },
   audio,                                                // read-only headphone-gate probe
@@ -197,7 +197,7 @@ assets/                error|pending|completed × 4 **static** webp tiers (681 K
 assets/sounds/         attention.wav, complete.wav (+ their manifest)
 docs/ARCHITECTURE.md   layering, state model, settings schema, line-number index
 docs/EXTENDING.md      API surface + how to extend without breaking data
-docs/TESTING.md        the 121 test groups, each with its source line
+docs/TESTING.md        the 123 test groups, each with its source line
 test/classify.test.mjs the whole self-test (pure node, no browser)
 tools/attn-ring/       super-reminder script + media/{smack,wave}.gif + build-media.py — SHIPS in the package
 tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell) — SHIPS in the package
@@ -210,7 +210,7 @@ tools/meru-tts/        optional TTS helper; repo only, NOT in the package (~1.6 
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs      # expect: PASS — 121 groups
+node test/classify.test.mjs      # expect: PASS — 123 groups
 ```
 
 `node --check` alone is not enough: a deleted-but-still-referenced constant is
@@ -277,7 +277,12 @@ Git may not be under `C:\Program Files\Git`. Ask the tool itself:
 8. **The super reminder is Windows-only.** It is a WPF window started by PowerShell
    (`tools/attn-ring/Show-AttnRing.ps1`); on other platforms the switches save but
    nothing rises. It covers the primary screen only (`-Scope Primary`), and all three
-   switches ship off — default silence is the point of that feature. The default look
+   switches ship off — default silence is the point of that feature. Since 5.3.2 the
+   player **latches**: a state must sit unchanged for `ring.afterMinutes` (default 7,
+   1–60) before the clip rises, then once per interval up to `ring.repeatTimes`
+   (default 1, 1–99); any change restarts the count, an already-open `error` session
+   is treated as acknowledged, and missed intervals are never replayed as a burst.
+   The default look
    is a transparent animated clip (`anim=Gif`, `smack.gif` for `error`/`pending`,
    `wave.gif` for `completed`, 320×320, no backdrop); `Expand` / `Breathe` / `None`
    still draw the amber ring, and a missing or undecodable clip falls back to it.
