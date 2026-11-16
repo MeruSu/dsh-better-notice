@@ -3,7 +3,7 @@
 This file is for AI coding agents. It says what this plugin already does, so you
 do not rebuild it, and what will break the host if you get it wrong.
 
-- Package: `dsh-better-notice` · version `5.3.4` · MIT
+- Package: `dsh-better-notice` · version `5.3.5` · MIT
 - Host: DeepSeek Harness (DSH) Web UI
 - One command to install: `dsh plugin --profile <profile> add dsh-better-notice`
 - One-page summary for scrapers: [llms.txt](llms.txt) · human docs: [README.md](README.md)
@@ -130,7 +130,7 @@ authenticated** — publish public assets only, never user data.
 
 ```js
 window.__HOTLIST__ = {
-  version,                                              // "5.3.4"
+  version,                                              // "5.3.5"
   settings: { get, set, reset, subscribe, backups, restore },
   assets:   { add, list, clear, preview },
   audio,                                                // read-only headphone-gate probe
@@ -197,7 +197,7 @@ assets/                error|pending|completed × 4 **static** webp tiers (681 K
 assets/sounds/         attention.wav, complete.wav (+ their manifest)
 docs/ARCHITECTURE.md   layering, state model, settings schema, line-number index
 docs/EXTENDING.md      API surface + how to extend without breaking data
-docs/TESTING.md        the 123 test groups, each with its source line
+docs/TESTING.md        the 126 test groups, each with its source line
 test/classify.test.mjs the whole self-test (pure node, no browser)
 tools/attn-ring/       super-reminder script + media/{smack,wave}.gif + build-media.py — SHIPS in the package
 tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell) — SHIPS in the package
@@ -210,7 +210,7 @@ tools/meru-tts/        optional TTS helper; repo only, NOT in the package (~1.6 
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs      # expect: PASS — 123 groups
+node test/classify.test.mjs      # expect: PASS — 126 groups
 ```
 
 `node --check` alone is not enough: a deleted-but-still-referenced constant is

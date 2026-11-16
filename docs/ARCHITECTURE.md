@@ -2,9 +2,11 @@
 
 目标读者：下一个要改这份代码的人。看完应该能回答三件事——状态从哪来、三种显示位置各自怎么挂、哪些地方看起来"脏"但**换干净写法会更糟**。
 
-所有行号对 `client.js`（**8163 行，v5.3.4**）。**行号是起点不是真理**：文件一改就漂，按符号名搜（`grep -n 'function classify' client.js`）才准。
+所有行号对 `client.js`（**8094 行，v5.3.5**）。**行号是起点不是真理**：文件一改就漂，按符号名搜（`grep -n 'function classify' client.js`）才准。
 
-这批 `client.js:N` 在 **v5.3.2 又整体重钉过一次**，做法是拿**上一版快照**（`git show HEAD:client.js`，7914 行）当基准：对每个旧行号先找出它落在旧文件的哪个定义符号里，再定位新文件（8142 行）里同名符号的定义行，最后按原偏移平移（区间保持原长度，符号消失就报出来不猜）。所以每条引用都仍然落在**同一个符号内部**，只是绝对行号变了。`test:N` 的 **123 条**同样按测试名从源码行号重新对齐（`docs/TESTING.md` §1.2 的行号就是真值）。
+这批 `client.js:N` 在 **v5.3.2 又整体重钉过一次**，做法是拿**上一版快照**（`git show HEAD:client.js`，7914 行）当基准：对每个旧行号先找出它落在旧文件的哪个定义符号里，再定位新文件（8142 行）里同名符号的定义行，最后按原偏移平移（区间保持原长度，符号消失就报出来不猜）。所以每条引用都仍然落在**同一个符号内部**，只是绝对行号变了。`test:N` 的 **126 条**同样按测试名从源码行号重新对齐（`docs/TESTING.md` §1.2 的行号就是真值）。
+
+**v5.3.5 又动过一次，这次只重钉了一半**：burst（抽签）机制整体删除，`client.js` 从 8,163 行缩到 8,094 行，行号整体前移。本版新增的 **§23** 用的是 5.3.5 的现查真值；**§1–§22 里的 `client.js:N` 仍是 5.3.4 快照的行号**（大致前移 60–90 行，符号名没变，按 `grep -n '<符号名>'` 现查即可）。下一次统一重钉时一并处理——这也是为什么每条引用都写了符号名，而不是只写数字。
 
 **核对方式**：拿符号名 `grep -n` 一遍，行号应当紧挨着那个符号的定义；维护者机器上有个 refcheck 小脚本就是干这件事的（把每条 `client.js:N` 与同行提到的符号名对齐，越界即 FAIL）。
 
@@ -246,6 +248,8 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 
 ## 16. 动效为什么是"抽签"而不是"常亮"
 
+> 5.3.5 起本节描述的模型已被 **§23** 取代（抽签/burst 整体删除，三处统一走 `motionPlanOf`）。本节保留作 5.3.4 及以前的行为记录。
+
 旧做法是给每个座位加 CSS 无限动画并按 `maxAnimated` 截断，结果是整屏图标一起转、看不出重点。现在：
 
 - 每个类别有自己的 `glyph.frequency`（0–1、步进 0.05、默认按类：置顶 0.3 / 报错 0.9 / 待处理 0.9 / 已完成 1 / 进行中 1 / 闲置 0；1 = 每个节拍都播、0 = 该类永不动）。侧栏适配器仍是 1s ticker，但不再按时间记账：**每个类别每 tick 掷一次**骰子 —— `roll = Math.random()`，`roll >= frequency` 就跳过，命中后用同一个 `roll` 从该类里挑**一个**座位播一遍单程动画（`MOTION_MS{spin:2400,pulse:1600,bounce:1200,blink:1200}`，`client.js:3342`）。所以单测能精确断言「每类每 tick 恰好一次随机调用」；`frequency` 为 0 的类连骰子都不掷。
@@ -340,6 +344,8 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 **节流是两份，不是共用。** `RING_THROTTLE_MS`（`client.js:270`）与 `SOUND_THROTTLE_MS`（`client.js:360`）都是 1500 ms，但它们是两个常量、各有一份 `lastAt`。共用一份会让「刚响过声音」把光圈压掉，而那正是最该弹的时候。
 
 ## 20. 顶栏胶囊的动效：常驻一层 + 抽签一层
+
+> 5.3.5 起本节描述的"常驻一层 + 抽签一层"已被 **§23** 取代：三层表面共用同一份计划，burst 层删除。本节保留作 5.3.4 及以前的行为记录。
 
 侧栏图标和 tab 座位的动效是**抽签**的：每类按 `glyph.frequency` 掷一次，命中才播一遍（见 §16）。顶栏胶囊不是——**它只要挂在屏幕上就一直在动**，频率命中时再**多补一次**。这不是漏改，是刻意的：一条静止的胶囊带挨着会动的侧栏图标，用户会以为顶栏坏了。
 
@@ -548,3 +554,53 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 - `audio config: the prompt never leaks a placeholder or a home directory`（`test:5126` 起）：中英两版都不留 `{{`、有绝对路径时不出现 `%USERPROFILE%`、`script:null` 时整句替换。
 - 真机：改文件 → 不点任何按钮 → 最迟一个 `AUDIO_PROBE_TTL_MS` 周期后那一行自己变；点「重新读取」立即变；删掉文件 → 变回「未初始化」而不是留着旧状态。
 
+## 23. 一处动效计划、三处同一节拍（5.3.5）
+
+用户原话：「顶栏 / Tab 栏 / 侧栏动画统一：只有前两个统一，侧栏不是，不管三个都统一成什么样，都得统一成设置里用户调的样式。」5.3.5 之前的模型是**三套**：tab 座与顶栏胶囊常驻循环（各自写各自的 delay 算式），侧栏 glyph 走 burst 抽签（`motionBursts` + `MOTION_CONCURRENCY`）——同一个会话在三个表面上看起来是三段各跑各的动画。5.3.5 把它们压成一个模型。
+
+### 23.1 唯一的出处：`motionPlanOf(settings, sessionId, category, motion, motionTarget)`
+
+四个纯函数（`client.js:2038-2095`，紧接 `motionPhaseOf` `client.js:2032`）：
+
+- `motionTempoOf(frequency)`（`client.js:2038`）— `frequency > 0` 才有效，夹到 `[0.05, 1]`；否则 0（停）。
+- `motionDurationOf(motion, frequency)`（`client.js:2044`）— `base / tempo` 取整；`MOTION_MS = {spin:2400, pulse:1600, bounce:1200, blink:1200}`（`client.js:3444`）是基准，`base / max(freq, 0.05)` 是最终时长。**`frequency` 是三者共用的节奏倍率，不再是「每拍掷一次」的死开关。**
+- `motionDelayCss(phaseMs)`（`client.js:2052`）— 统一拼 `calc(-1 * <N>ms)`，三处字符串可比对。
+- `motionPlanOf(...)`（`client.js:2071`）— 返回 `{motion, motionTarget, durationMs, delayMs, delayCss, animation, textAnimation}`；`motion`/`motionTarget` 可被调用方覆盖（`question` token 已解析成 `glyphSecondary` 时传进来），缺省回退 `categories[category].glyph`；`motion === 'none'` 或 `display.reduceMotion === 'on'` 或 `durationMs === 0` → `{motion:'none', delayCss:'0ms', animation:'', textAnimation:''}`。**`animation` / `textAnimation` 字符串在这里拼好**，三处直接内联写入——`animation-name`、`duration`、`delay` 相等是靠「同一个函数产出」保证的，不是靠三份拷贝恰好一致。
+
+### 23.2 三处怎么用它（写入点）
+
+| 表面 | 写入点 | 写什么 |
+|---|---|---|
+| 侧栏 glyph | `applyMotion(settings, rows)`（`client.js:3859`，`createSidebarAdapter` 内 refresh 末尾调） | `marker.host` 设 `data-hotlist-motion` + 内联 `animation-duration` / `animation-delay`；`row` 目标再 `animateTitle(marker, plan)` 写标题 span |
+| tab 座 | `decorateTabSeat(settings, seat)`（`client.js:6717`，由 `decorateTabSeats` `client.js:6771` 遍历） | 永远只动 glyph span（5.3.4 的取舍不变：tab 座不动宿主标题）；`plan.delayCss` 写 `animation-delay`，`plan.durationMs` 写 `animation-duration` |
+| 顶栏胶囊 | `topbarChips(settings, plan)`（`client.js:6986`）→ `topbarChipNode(chip)`（`client.js:7094`） | 内联 `animation-delay` / `animation-duration` 放到 emoji span（`glyph` 目标）或标题 span（`row` 目标） |
+
+三处各自仍带自己的样式表（`SIDEBAR_STYLE` `client.js:3449` / `TAB_CSS` `client.js:6663` / `CHIP_CSS` `client.js:7237`，keyframes 重复定义无害），CSS 管 `animation-name` + `timing` + `will-change`，内联只盖 `duration` 与 `delay` 两个长属性——所以频率变了不用动 CSS。
+
+### 23.3 相位种子
+
+`phase = motionPhaseOf(sessionId, category, durationMs) = fnv1a(String(sessionId) + '|' + String(category)) % round(durationMs)`（`client.js:2032`；纯函数、无计时器、不随时间变）。三处都从 `motionPlanOf` 拿同一个 `delayMs`，所以同一会话在顶栏、tab 行、侧栏**从关键帧的同一个点起播**。`fnv1a` 的低位分布让同一类的不同会话错开（不会整屏同相闪），不同类必然错开（种子含 category）。
+
+### 23.4 burst 机制整体删除
+
+`motionBursts` / `startBurst` / `stopBurst` / `burstMotion` / `bandBursts` / `chipBursts` / `startChipBurst` / `stopChipBurst` / `publishBursts` / `MOTION_CONCURRENCY` / `BURST_ATTR` / `TEXT_MOTION` / `TEXT_BURST` / `data-hotlist-chip-burst` 全部删净（grep 过，5.3.5 源码里零残留）。侧栏 `tick()` 现在只切 `MOTION_PAUSED_ATTR`（窗口隐藏暂停），不再掷骰子。§16 / §20 描述的是 5.3.4 及以前的模型，已被本节取代。
+
+### 23.5 预览与文案
+
+- `previewStyle(motion, frequency)`（`client.js:4139`）改用 tempo 语义：`hl-pv-<motion>-20 <motionDurationOf>ms linear infinite`（始终满占空比、频率只拉长周期），`PREVIEW_STEPS = 20`（`client.js:4113`）的其余档位 keyframes 仍生成但不再被引用。
+- 设置页滑块文案：zh「节奏倍率：0% 停；100% 原速；越低越慢。顶栏、Tab 栏、侧栏三处一起变。」/ en「Tempo: 0% stops; 100% is the base speed; lower is slower. The top bar, the tab row and the sidebar all change together.」
+
+### 23.6 真机读数（2026-11-17，meru-test 59585，5.3.5）
+
+同一个会话（`error` 类，`glyph.motionTarget` 先设 `glyph`）在同一时刻三处 `getAnimations()` / `getComputedStyle` 的读数：
+
+| 表面 | `animationName` | `animationDuration` | `animationDelay` | `iterationCount` |
+|---|---|---|---|---|
+| 顶栏胶囊 emoji（`[data-hotlist-chip-emoji]`） | `hl-bounce` | `1.2s`（1200ms） | `-0.032s`（-32ms） | `infinite` |
+| tab 座 glyph（`[data-hotlist-tab-glyph]`） | `hl-bounce` | `1.2s` | `-0.032s` | `infinite` |
+| 侧栏 glyph（`[data-hotlist-glyph]`） | `hl-bounce` | `1.2s` | `-0.032s` | `infinite` |
+
+- 这三行就是 §23.3 的兑现：当时该会话所在类别的 `frequency` 是 `1`，所以 `motionDurationOf('bounce', 1) = 1200`；`delay = fnv1a(sessionId|'error') % 1200 = 32`。（换成默认 `0.9` 就是 `round(1200/0.9) = 1333`——同一函数、不同输入，三处一起变。）
+- 把 `motionTarget` 换回默认 `row` 后，胶囊的动画落在标题 span 上：`hl-text-bounce / 1.2s / -0.032s`，而 tab 座与侧栏仍动 glyph（`hl-bounce`）。**名字差一个 `text-` 前缀、时长与相位完全相同**——这是 tab 行「不 wrap 宿主标题」那条取舍的必然结果（§23.2）。
+- 把该类的「节奏倍率」调到 0：三处 `animationName` 全变 `none`、`getAnimations().length === 0`。
+- **Web 的一个已知观感限制**：网页版没有窗口标题带，`topbar.previewInWeb` 开的预览条画在页面 `top:0`（实测 `(0,0,1264,40)`、胶囊 `(288,8,90,24)`），会被宿主自己的页头盖住——数值与动画都在跑，但**截图里看不见那颗胶囊**。要肉眼验收三处同屏，用桌面版。

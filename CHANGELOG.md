@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.3.5 — 2026-11-17
+
+**三处动效统一成一份计划。** 用户原话：「顶栏 / Tab 栏 / 侧栏动画统一：只有前两个统一，侧栏不是，不管三个都统一成什么样，都得统一成设置里用户调的样式。」5.3.5 之前是三套模型：tab 座与顶栏胶囊常驻循环、侧栏 glyph 走 burst 抽签（`motionBursts` + `MOTION_CONCURRENCY` 限并发）。现在三处全部从同一个 `motionPlanOf(settings, sessionId, category, motion, motionTarget)` 派生：同一套 keyframes、同一个时长、同一个相位种子（`fnv1a(sessionId|category)`），一个会话在哪个表面上看起来都是同一段动画。
+
+- **`frequency` 从「抽签概率」变成三者共用的节奏倍率（tempo）。** 时长 = 基准 / `max(频率, 0.05)`：`0` = 停，`1` = 原速（2400/1600/1200ms），越低越慢。不再是「每 tick 掷一次骰子、命中才动一下」。
+- **burst 机制整体删除**：`motionBursts` / `startBurst` / `stopBurst` / `bandBursts` / `chipBursts` / `MOTION_CONCURRENCY` / `data-hotlist-burst` / `data-hotlist-chip-burst` 全部移除，侧栏 tick 只保留窗口隐藏时的暂停属性。`Math.random` 不再参与动效。
+- **设置页滑块改文案**：「播放频率」→「节奏倍率」，提示写明「顶栏、Tab 栏、侧栏三处一起变」；预览动画（`previewStyle`）改为 tempo 语义（始终 20 档、频率只拉长周期）。
+- `prefers-reduced-motion` 与 `display.reduceMotion: 'on'` 三处一起停（行为不变，仍不升 `SETTINGS_VERSION`，老 `glyph.frequency` / `glyph.motion` 键保持可用）。
+- 测试：`sidebar motion bursts` / `pills keep their class animation, and a burst plays it once` 按新模型重写；新增三组守门（`one session wears the same plan on all three surfaces` / `the seed separates sessions and classes` / `frequency moves all three surfaces together`），测试总数 123 → 126。
+- `VERSION` / `package.json.version` → `5.3.5`；`SETTINGS_VERSION` 仍为 4，无迁移。
+
 ## 5.3.4 — 2026-11-15
 
 **修复：tab 座位的沙漏又转起来了。** 5.3.2 让 tab 座位跟着 `motionTarget` 走（默认 `'row'`），结果它把宿主 tab 的标题包进我们自己的 span、把图标停在 `none` —— 用户看到的正是「Tab 栏的沙漏不转了」。这一版把规矩改回一句话：**tab 座位只动图标，宿主标题永不包**。`motionTarget` 仍然是侧栏行与顶栏胶囊的设置。

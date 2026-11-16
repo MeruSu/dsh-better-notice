@@ -37,12 +37,12 @@ cd <your clone directory>
 
 node --check client.js          # 语法闸门。client.js 的语法错只在真机 boot 时炸，没有别的地方会替你发现
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 123 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 126 groups
 ```
 
 然后进真机：
 
-1. **强刷页面**（`Ctrl+F5`），控制台敲 `window.__HOTLIST_VERSION__`，必须是 `'5.3.4'`（或你改后的版本号）。不是旧值说明加载的还是缓存。
+1. **强刷页面**（`Ctrl+F5`），控制台敲 `window.__HOTLIST_VERSION__`，必须是 `'5.3.5'`（或你改后的版本号）。不是旧值说明加载的还是缓存。
 2. 打开 设置 → 热表，确认设置页能渲染、6 张卡都在。
 3. 按你改的那块功能实际走一遍：座位数量、侧栏图标、弹出图、音效。**能在界面上看见的才算改完**，单测绿了不代表平时能看。
 4. 改了 `index.js` / `cordis.patch.yml` / `package.json` 的，**重启 GUI 再看**，光刷新不算。
@@ -86,7 +86,7 @@ register('hotlist.cycle.prev', 'BracketLeft', () => t('shortcuts.cyclePrev'));
   - 差：`fix bug`
 - 一个提交只做一件事。格式化、重命名混在功能改动里，复核时看不出哪行是真正的改动。
 - 改了用户能看见的行为，同步更新 [CHANGELOG.md](CHANGELOG.md)（一条一段：改了什么、为什么、影响谁）。
-- 版本号在两处，必须一致：`client.js` 的 `VERSION`（`client.js:82`）与 `package.json` 的 `version`。发布版两者同步（当前都是 `5.3.4`）；`package.json` 的 `version` 同时是 npm 分发版本号。
+- 版本号在两处，必须一致：`client.js` 的 `VERSION`（`client.js:82`）与 `package.json` 的 `version`。发布版两者同步（当前都是 `5.3.5`）；`package.json` 的 `version` 同时是 npm 分发版本号。
 
 ## 几件不要做的事
 
@@ -98,7 +98,7 @@ register('hotlist.cycle.prev', 'BracketLeft', () => t('shortcuts.cyclePrev'));
 ## PR 前自查
 
 - [ ] `node --check client.js` 和 `node --check index.js` 都过
-- [ ] `node test/classify.test.mjs` 末行是 `PASS — 123 groups`（或你更新后的组数）
+- [ ] `node test/classify.test.mjs` 末行是 `PASS — 126 groups`（或你更新后的组数）
 - [ ] 强刷后 `window.__HOTLIST_VERSION__` 是新版本号
 - [ ] 在真机界面上实际看过改动（不是只看测试输出）
 - [ ] 改了设置形状的，迁移和迁移单测都在

@@ -34,7 +34,7 @@ api.lastError()        // 最近一次写盘错误（字符串或 null）
 ```
 
 同一对象也挂在旧名 `window.__SESSION_SWITCHER_SETTINGS__`（v2.x 兼容，别在新代码里用）。
-插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.4'`）。
+插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.5'`）。
 
 写设置后不需要刷新页面：tab、侧栏、设置页都在同一个 store 上重算。
 
@@ -418,7 +418,7 @@ await fetch('/hotlist-ring?cat=pending&seconds=4&scope=Primary&anim=Gif',
 
 ---
 
-## 9. 这一版的类别判定优先级（v5.3.4）
+## 9. 这一版的类别判定优先级（v5.3.5）
 
 **一个会话只属于一个类别。** `classify()` 从上往下走，第一条命中的就定了，后面的条件不再看。
 

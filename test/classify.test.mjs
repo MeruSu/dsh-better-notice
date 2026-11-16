@@ -1704,14 +1704,14 @@ test('glyph source resolution', () => {
   assert.equal(api.resolveStateGlyph(settings, 'approval').value, '🔐', 'an empty emoji falls back to the built-in');
 });
 
-// 39. Sidebar motion is a scheduled burst: one roll per class per tick, four spans at most, none under reduce.
-test('sidebar motion bursts', () => {
+// 39. Sidebar motion is the shared continuous plan: the glyph wears its category
+//     motion with the tempo duration and the seeded phase, and it never rolls.
+test('sidebar motion is the shared continuous plan', () => {
   const realRandom = Math.random;
   let rolls = 0;
-  let value = 0.2;
   Math.random = () => {
     rolls += 1;
-    return value;
+    return 0.2;
   };
   const settings = api.sanitizeSettings(api.defaultSettings());
   for (const category of ['pending', 'running', 'error']) settings.categories[category].glyph.frequency = 1;
@@ -1736,33 +1736,52 @@ test('sidebar motion bursts', () => {
   });
   try {
     adapter.start();
-    adapter.tick();
-    assert.equal(rolls, 3, 'one roll per class, never one per row');
-    assert.equal(document.querySelectorAll('[data-hotlist-burst]').length, 3, 'one burst per class, three classes');
+    const glyphs = [...document.querySelectorAll('[data-hotlist-glyph]')];
+    assert.equal(glyphs.length, 3, 'three rows, three glyph spans');
 
-    /** Reduce stops every running burst and never rolls again. */
+    /** The attribute is the motion itself, no burst marker anywhere, no lottery at all. */
+    assert.equal(document.querySelectorAll('[data-hotlist-burst]').length, 0, 'the burst attribute is gone');
+    assert.equal(rolls, 0, 'a continuous plan never rolls');
+
+    /** Pending and error default to bounce, running to spin — same as the band and the tab row. */
+    const pending = glyphs.find((g) => g.parentElement.getAttribute('data-row-key') === 'session:session-pending');
+    const running = glyphs.find((g) => g.parentElement.getAttribute('data-row-key') === 'session:session-running');
+    const error = glyphs.find((g) => g.parentElement.getAttribute('data-row-key') === 'session:session-error');
+    assert.equal(pending.getAttribute('data-hotlist-motion'), 'bounce');
+    assert.equal(running.getAttribute('data-hotlist-motion'), 'spin');
+    assert.equal(error.getAttribute('data-hotlist-motion'), 'bounce');
+
+    /** Duration carries the shared tempo: base / max(frequency, 0.05). */
+    assert.equal(pending.style.animationDuration, '1200ms');
+    assert.equal(running.style.animationDuration, '2400ms');
+
+    /** The phase is the seeded one the band and the tab row also use. */
+    assert.equal(pending.style.animationDelay, `calc(-1 * ${api.motionPhaseOf('session-pending', 'pending', 1200)}ms)`);
+    assert.equal(running.style.animationDelay, `calc(-1 * ${api.motionPhaseOf('session-running', 'running', 2400)}ms)`);
+
+    /** Reduce stops every surface at once: motion none, durations cleared. */
     settings.display.reduceMotion = 'on';
-    adapter.tick();
-    assert.equal(document.querySelectorAll('[data-hotlist-burst]').length, 0);
-    assert.equal(rolls, 3);
+    adapter.refresh();
+    for (const glyph of glyphs) {
+      assert.equal(glyph.getAttribute('data-hotlist-motion'), 'none');
+      assert.equal(glyph.style.animationDuration, '');
+    }
 
-    /** Frequency 0 is the explicit "never animate this class" switch, and it skips the roll itself. */
+    /** Frequency 0 is the explicit "never animate this class" switch. */
     settings.display.reduceMotion = 'auto';
     for (const category of ['pending', 'running', 'error']) settings.categories[category].glyph.frequency = 0;
-    adapter.tick();
-    assert.equal(document.querySelectorAll('[data-hotlist-burst]').length, 0);
-    assert.equal(rolls, 3, 'a class at 0% is skipped before it ever rolls');
+    adapter.refresh();
+    for (const glyph of glyphs) {
+      assert.equal(glyph.getAttribute('data-hotlist-motion'), 'none');
+      assert.equal(glyph.style.animationDuration, '');
+    }
 
-    /** A low frequency still rolls once, then almost always loses: that is the whole point of the slider. */
+    /** A low frequency is a slow tempo, not a rare lottery: the cycle still runs. */
     for (const category of ['pending', 'running', 'error']) settings.categories[category].glyph.frequency = 0.05;
-    value = 0.9;
-    adapter.tick();
-    assert.equal(rolls, 6);
-    assert.equal(document.querySelectorAll('[data-hotlist-burst]').length, 0, 'a 5% class usually loses its roll');
-    value = 0.02;
-    adapter.tick();
-    assert.equal(rolls, 9);
-    assert.equal(document.querySelectorAll('[data-hotlist-burst]').length <= 4, true, 'a winner still respects the cap');
+    adapter.refresh();
+    assert.equal(running.getAttribute('data-hotlist-motion'), 'spin');
+    assert.equal(running.style.animationDuration, '48000ms');
+    assert.equal(rolls, 0, 'slowing down still never rolls');
   } finally {
     adapter.stop();
     Math.random = realRandom;
@@ -2343,7 +2362,7 @@ test('recent window migration and clamping', () => {
   assert.equal(api.classify(settings, input).filter((row) => row.category === 'idle').length, 1);
 });
 
-// 47. The preview loops while the card is open, and its duty cycle is the frequency.
+// 47. The preview loops while the card is open, and its tempo is the frequency.
 test('preview loop lifecycle', () => {
   const glyphFor = (page, category) => collect(page, (props) => props.key === `glyph-${category}-primary`)
     .find((node) => node.props['data-hotlist-glyph'] !== undefined);
@@ -2359,7 +2378,7 @@ test('preview loop lifecycle', () => {
 
     api.writeSettings({ categories: { completed: { glyph: { motion: 'spin', frequency: 0.5 } } } });
     const half = renderPage();
-    assert.equal(glyphFor(half.page, 'completed').props.style.animation, 'hl-pv-spin-10 4800ms linear infinite', '50% halves the duty cycle and doubles the period');
+    assert.equal(glyphFor(half.page, 'completed').props.style.animation, 'hl-pv-spin-20 4800ms linear infinite', '50% halves the tempo and doubles the period');
     half.harness.cleanup();
 
     /** A class at 0% renders a still glyph: the animation is not merely slow, it is absent. */
@@ -2380,8 +2399,9 @@ test('preview loop lifecycle', () => {
 
 /**
  * `motionTarget: 'row'` used to look dead: the title keyframes only faded opacity,
- * so a 1px-wide glyph moving read as "nothing happens". v4.4 adds a small translate
- * and this group pins both halves — the title gets the burst, and the keyframes move.
+ * so a 1px-wide glyph moving read as "nothing happens". v4.4 adds a small translate;
+ * v5.3.5 made the row motion the same continuous plan as the glyph — this group pins
+ * the title's plan string and the moving keyframes.
  */
 test('motion target row reaches the title', () => {
   const settings = api.defaultSettings();
@@ -2404,10 +2424,11 @@ test('motion target row reaches the title', () => {
   });
   try {
     adapter.start();
-    adapter.tick();
-    assert.equal(title.style.animation, 'hl-text-blink 1.2s ease-in-out 1', 'the row target animates the title itself');
+    assert.equal(title.style.animation, 'hl-text-blink 1200ms ease-in-out infinite', 'the row target animates the title with the shared continuous plan');
     assert.equal(title.hasAttribute('data-hotlist-text-motion'), true);
-    assert.equal(row.querySelectorAll('[data-hotlist-burst]').length, 1);
+    assert.equal(title.style.animationDelay, `calc(-1 * ${api.motionPhaseOf('session-ask', 'pending', 1200)}ms)`, 'the title opens at the same seeded phase as the glyph');
+    assert.equal(row.querySelectorAll('[data-hotlist-burst]').length, 0, 'row motion is not a burst');
+    assert.equal(row.querySelector('[data-hotlist-glyph]').getAttribute('data-hotlist-motion'), 'blink', 'the glyph wears the same motion');
 
     /** The text keyframes must actually move pixels; opacity alone is what made the option look broken. */
     const css = head.querySelectorAll('[data-hotlist-style]').map((node) => node.textContent).join('\n');
@@ -4100,8 +4121,9 @@ test('pills carry the class animation', () => {
   }
 });
 
-// 90b. The band animates while it just sits there; a burst is the same motion, played once.
-test('pills keep their class animation, and a burst plays it once', () => {
+// 90b. The band animates while it just sits there: same continuous plan as the tab row
+//      and the sidebar, no burst layer at all.
+test('pills keep their class animation on the shared plan', () => {
   /** The band injects its own stylesheet; read what it actually put in the document. */
   const chipStyleText = () => {
     const nodes = globalThis.document.head.children.filter(
@@ -4112,7 +4134,7 @@ test('pills keep their class animation, and a burst plays it once', () => {
   const ids = ['sit-ask'];
   const byId = { 'sit-ask': session({ id: 'sit-ask', displayTitle: '等审批' }) };
   enableTopbar();
-  // Frequency 0 means the band never rolls a hit, so "at rest" is deterministic here.
+  // Frequency 0 is the "stop" end of the shared tempo, so "at rest" is deterministic here.
   api.writeSettings({
     categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, frequency: 0 } } },
   });
@@ -4129,16 +4151,13 @@ test('pills keep their class animation, and a burst plays it once', () => {
       css.includes('[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out infinite}'),
       'the title animates for as long as the pill is on screen',
     );
-    assert.ok(
-      css.includes('[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out 1}'),
-      'a burst is the same animation, played once',
-    );
+    assert.equal(css.includes('data-hotlist-chip-burst'), false, 'the burst layer is gone from the stylesheet');
     for (const motion of ['spin', 'pulse', 'bounce', 'blink']) {
       const timing = motion === 'spin' ? '2.4s linear' : motion === 'pulse' ? '1.6s ease-in-out' : '1.2s ease-in-out';
       const scale = motion === 'blink' ? '' : ';will-change:transform';
       assert.ok(
         css.includes(`[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-emoji]{animation:hl-${motion} ${timing} infinite${scale}}`),
-        `a glyph with ${motion} animates without waiting for a burst`,
+        `a glyph with ${motion} animates while it just sits there`,
       );
       assert.ok(
         css.includes(`[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-title]{animation:hl-text-${motion} ${timing} infinite}`),
@@ -4151,16 +4170,34 @@ test('pills keep their class animation, and a burst plays it once', () => {
 
     const pill = () =>
       collect(harness.entries.get(api.TOPBAR_ID).Component({}), (props) => typeof props['data-hotlist-chip'] === 'string')[0];
+    const glyphSpan = () =>
+      collect(harness.entries.get(api.TOPBAR_ID).Component({}), (props) => props['data-hotlist-chip-emoji'] !== undefined)[0];
+    const titleSpan = () =>
+      collect(harness.entries.get(api.TOPBAR_ID).Component({}), (props) => props['data-hotlist-chip-title'] !== undefined)[0];
+
     const resting = pill();
-    assert.equal(resting.props['data-hotlist-chip-motion'], 'bounce', 'the class motion is declared at rest');
-    assert.equal(resting.props['data-hotlist-chip-target'], 'row', 'so is the target, before any burst happens');
-    assert.equal(resting.props['data-hotlist-chip-burst'], undefined, 'nothing is bursting at rest');
+    assert.equal(resting.props['data-hotlist-chip-motion'], undefined, 'a 0% tempo declares no motion: stop is stop, not a rare lottery');
+    assert.equal(resting.props['data-hotlist-chip-burst'], undefined, 'the burst attribute does not exist anymore');
+
+    api.writeSettings({
+      categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, frequency: 1, motion: 'bounce', motionTarget: 'row' } } },
+    });
+    const moving = pill();
+    assert.equal(moving.props['data-hotlist-chip-motion'], 'bounce', 'the class motion is declared at rest');
+    assert.equal(moving.props['data-hotlist-chip-target'], 'row', 'so is the target, before any animation starts');
+    const title = titleSpan();
+    assert.equal(title.props.style.animationDelay, `calc(-1 * ${api.motionPhaseOf('sit-ask', 'pending', 1200)}ms)`, 'the title opens at the shared seeded phase');
+    assert.equal(title.props.style.animationDuration, '1200ms', 'the title runs at the shared tempo duration');
+
     api.writeSettings({
       categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, motion: 'blink', motionTarget: 'glyph' } } },
     });
     const switched = pill();
     assert.equal(switched.props['data-hotlist-chip-motion'], 'blink', 'the new motion is picked up');
     assert.equal(switched.props['data-hotlist-chip-target'], 'emoji', 'a glyph target is declared just as early');
+    const glyph = glyphSpan();
+    assert.equal(glyph.props.style.animationDelay, `calc(-1 * ${api.motionPhaseOf('sit-ask', 'pending', 1200)}ms)`, 'the glyph takes over the same phase');
+    assert.equal(glyph.props.style.animationDuration, '1200ms');
   } finally {
     harness.cleanup();
     api.resetSettings();
@@ -4191,7 +4228,11 @@ test('tab seats draw the same glyph and motion', () => {
     assert.equal(glyph.getAttribute('data-hotlist-motion'), 'bounce', 'the glyph always carries the class motion, even with a row target');
     const title = button.children.find((child) => child.hasAttribute('data-hotlist-tab-title'));
     assert.equal(title, undefined, 'a tab never wraps the host title text');
-    assert.equal(glyph.style.animationDelay, 'calc(-1 * ' + api.motionPhaseOf('tab-pin', 'pinned', 1200) + 'ms)', 'the seat opens the keyframe at the shared phase');
+    /** Pinned defaults to frequency 0.3, so the plan runs at 1200 / 0.3 = 4000 ms — the same number all three surfaces share. */
+    const freq = api.readSettings().categories.pinned.glyph.frequency;
+    const duration = Math.round(1200 / Math.max(freq, 0.05));
+    assert.equal(glyph.style.animationDelay, 'calc(-1 * ' + api.motionPhaseOf('tab-pin', 'pinned', duration) + 'ms)', 'the seat opens the keyframe at the shared phase');
+    assert.equal(glyph.style.animationDuration, `${duration}ms`, 'the seat runs at the shared tempo duration');
     assert.equal(textNode.textContent, '会话 tab-pin', 'the host text keeps only the title');
   } finally {
     harness.cleanup();
@@ -5219,12 +5260,159 @@ test('the band and the tab row derive the same phase from the same seed', () => 
     assert.ok(chip !== undefined, 'the band holds the same session');
     const chipTitle = collect(chip, (props) => typeof props['data-hotlist-chip-title'] === 'string')[0];
     assert.ok(chipTitle !== undefined, 'and its title is the row target');
-    const phase = 'calc(-1 * ' + api.motionPhaseOf('phase-a', 'pending', 1200) + 'ms)';
+    /** Pending defaults to frequency 0.9, so the plan runs at 1200 / 0.9 = 1333 ms; both surfaces derive from the same plan. */
+    const freq = api.readSettings().categories.pending.glyph.frequency;
+    const duration = Math.round(1200 / Math.max(freq, 0.05));
+    const phase = 'calc(-1 * ' + api.motionPhaseOf('phase-a', 'pending', duration) + 'ms)';
     assert.equal(tabGlyph.style.animationDelay, phase, 'the tab seat opens at the shared phase');
+    assert.equal(tabGlyph.style.animationDuration, `${duration}ms`, 'the tab seat runs at the shared tempo duration');
     assert.equal(chipTitle.props.style.animationDelay, phase, 'the pill opens at the same point');
+    assert.equal(chipTitle.props.style.animationDuration, `${duration}ms`, 'the pill runs at the same tempo duration');
   } finally {
     harness.cleanup();
     tabRow.children.length = 0;
+    api.resetSettings();
+  }
+});
+
+// 99. One session, three surfaces, one plan: the band pill, the tab seat and the
+//     sidebar glyph wear the same motion, the same tempo duration and the same
+//     seeded delay. This is the 5.3.5 guarantee the user asked for.
+test('one session wears the same plan on all three surfaces', () => {
+  tabRow.children.length = 0;
+  const button = el('button');
+  button.setAttribute('role', 'tab');
+  const textNode = { nodeType: 3, textContent: '会话 tri-a' };
+  button.childNodes = [textNode];
+  tabRow.appendChild(button);
+  clearSidebarRows();
+  sidebarRow('tri-a', '会话 tri-a');
+  const ids = ['tri-a'];
+  const byId = { 'tri-a': session({ id: 'tri-a', displayTitle: '会话 tri-a', updatedAt: NOW }) };
+  enableTopbar();
+  api.writeSettings({ categories: { pending: { surfaces: { ...DEFAULTS.categories.pending.surfaces, tab: true } } } });
+  const harness = createCtx({
+    list: { ids, byId },
+    statuses: new Map([['tri-a', { pendingInteraction: { kind: 'approval' } }]]),
+    groups: { items: [{ workspaceId: 'w', sessionIds: ids }], archivedSessionIds: [] },
+  });
+  api.apply(harness.ctx, {});
+  try {
+    const sidebarGlyph = [...document.querySelectorAll('[data-hotlist-glyph]')]
+      .find((g) => g.parentElement.getAttribute('data-row-key') === 'session:tri-a');
+    assert.ok(sidebarGlyph !== undefined, 'the sidebar painted a glyph for the session');
+    const tabGlyph = button.children.find((child) => typeof child.hasAttribute === 'function' && child.hasAttribute('data-hotlist-tab-glyph'));
+    assert.ok(tabGlyph !== undefined, 'the tab row painted a glyph for the session');
+    const band = harness.entries.get(api.TOPBAR_ID).Component({});
+    const chip = collect(band, (props) => typeof props['data-hotlist-chip'] === 'string')
+      .find((node) => node.props['data-hotlist-chip'] === 'tri-a');
+    assert.ok(chip !== undefined, 'the band holds the same session');
+    const chipTitle = collect(chip, (props) => typeof props['data-hotlist-chip-title'] === 'string')[0];
+
+    const freq = api.readSettings().categories.pending.glyph.frequency;
+    const duration = Math.round(1200 / Math.max(freq, 0.05));
+    const delay = `calc(-1 * ${api.motionPhaseOf('tri-a', 'pending', duration)}ms)`;
+    for (const surface of [sidebarGlyph, tabGlyph]) {
+      assert.equal(surface.getAttribute('data-hotlist-motion'), 'bounce', 'every surface wears the same motion name');
+      assert.equal(surface.style.animationDuration, `${duration}ms`, 'every surface runs the same tempo duration');
+      assert.equal(surface.style.animationDelay, delay, 'every surface opens at the same seeded phase');
+    }
+    assert.equal(chipTitle.props.style.animationDuration, `${duration}ms`, 'the band title runs the same tempo duration');
+    assert.equal(chipTitle.props.style.animationDelay, delay, 'the band title opens at the same seeded phase');
+  } finally {
+    harness.cleanup();
+    tabRow.children.length = 0;
+    clearSidebarRows();
+    clearStyleBlocks();
+    api.resetSettings();
+  }
+});
+
+// 100. The seed is (sessionId, category), and the surfaces actually use it: two
+//      sessions in one class get different delays, and the delay on the row is the
+//      seeded value — never a fixed 0ms, never a per-surface coin flip.
+test('the seed separates sessions and classes', () => {
+  assert.notEqual(api.motionPhaseOf('phase-x', 'pending', 2400), api.motionPhaseOf('phase-x', 'completed', 2400), 'one session differs per class');
+  assert.notEqual(api.motionPhaseOf('phase-x', 'pending', 2400), api.motionPhaseOf('phase-y', 'pending', 2400), 'two sessions differ per session');
+  assert.equal(api.motionPhaseOf('phase-x', 'pending', 2400), api.motionPhaseOf('phase-x', 'pending', 2400), 'the same (session, class) is stable');
+
+  const settings = api.defaultSettings();
+  settings.categories.pending.glyph.frequency = 1;
+  clearSidebarRows();
+  const { title: titleX } = sidebarRow('phase-x', '会话 X');
+  const { title: titleY } = sidebarRow('phase-y', '会话 Y');
+  const adapter = api.createSidebarAdapter({
+    document: globalThis.document,
+    readSettings: () => settings,
+    readSession: (sessionId) => ({
+      session: session({ id: sessionId }),
+      status: { running: true, pendingInteraction: { kind: 'approval' } },
+      error: undefined,
+      completedAt: undefined,
+      pinned: false,
+      children: 0,
+    }),
+  });
+  try {
+    adapter.start();
+    const delayX = `calc(-1 * ${api.motionPhaseOf('phase-x', 'pending', 1200)}ms)`;
+    const delayY = `calc(-1 * ${api.motionPhaseOf('phase-y', 'pending', 1200)}ms)`;
+    assert.equal(titleX.style.animationDelay, delayX, 'the row wears its own seeded phase');
+    assert.equal(titleY.style.animationDelay, delayY, 'the other row wears its own, different phase');
+    assert.notEqual(titleX.style.animationDelay, titleY.style.animationDelay, 'two rows in one class never strobe in lockstep');
+  } finally {
+    adapter.stop();
+    clearSidebarRows();
+    clearStyleBlocks();
+  }
+});
+
+// 101. The frequency is one shared tempo: changing it moves all three surfaces at
+//      once, to the same new duration, instead of only gating the sidebar lottery.
+test('frequency moves all three surfaces together', () => {
+  tabRow.children.length = 0;
+  const button = el('button');
+  button.setAttribute('role', 'tab');
+  const textNode = { nodeType: 3, textContent: '会话 tempo-a' };
+  button.childNodes = [textNode];
+  tabRow.appendChild(button);
+  clearSidebarRows();
+  sidebarRow('tempo-a', '会话 tempo-a');
+  const ids = ['tempo-a'];
+  const byId = { 'tempo-a': session({ id: 'tempo-a', displayTitle: '会话 tempo-a', updatedAt: NOW }) };
+  enableTopbar();
+  api.writeSettings({ categories: { pending: { surfaces: { ...DEFAULTS.categories.pending.surfaces, tab: true } } } });
+  const harness = createCtx({
+    list: { ids, byId },
+    statuses: new Map([['tempo-a', { pendingInteraction: { kind: 'approval' } }]]),
+    groups: { items: [{ workspaceId: 'w', sessionIds: ids }], archivedSessionIds: [] },
+  });
+  api.apply(harness.ctx, {});
+  try {
+    const durations = () => {
+      const sidebarGlyph = [...document.querySelectorAll('[data-hotlist-glyph]')]
+        .find((g) => g.parentElement.getAttribute('data-row-key') === 'session:tempo-a');
+      const tabGlyph = button.children.find((child) => typeof child.hasAttribute === 'function' && child.hasAttribute('data-hotlist-tab-glyph'));
+      const band = harness.entries.get(api.TOPBAR_ID).Component({});
+      const chip = collect(band, (props) => typeof props['data-hotlist-chip'] === 'string')
+        .find((node) => node.props['data-hotlist-chip'] === 'tempo-a');
+      const chipTitle = collect(chip, (props) => typeof props['data-hotlist-chip-title'] === 'string')[0];
+      return [sidebarGlyph.style.animationDuration, tabGlyph.style.animationDuration, chipTitle.props.style.animationDuration];
+    };
+
+    api.writeSettings({ categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, frequency: 1 } } } });
+    assert.deepEqual(durations(), ['1200ms', '1200ms', '1200ms'], 'at 100% all three run the base bounce duration');
+
+    api.writeSettings({ categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, frequency: 0.5 } } } });
+    assert.deepEqual(durations(), ['2400ms', '2400ms', '2400ms'], 'at 50% all three slow to the same doubled duration');
+
+    api.writeSettings({ categories: { pending: { glyph: { ...api.readSettings().categories.pending.glyph, frequency: 0 } } } });
+    assert.deepEqual(durations(), ['', '', undefined], 'at 0% all three stop at once');
+  } finally {
+    harness.cleanup();
+    tabRow.children.length = 0;
+    clearSidebarRows();
+    clearStyleBlocks();
     api.resetSettings();
   }
 });

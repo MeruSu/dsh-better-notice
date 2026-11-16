@@ -3,6 +3,16 @@
 > 规则：只记用户纠正过我什么、我改了什么、怎么改的，以及**已经定稿、不许再动**的部分。
 > 目的只有一个：同一件事不要被优化第二遍。每条都带日期，新的写在上方。
 
+## 2026-11-17 · 三处动效统一成一份共享计划（5.3.5）
+
+**用户的纠正**：「顶栏 / Tab 栏 / 侧栏动画统一：只有前两个统一，侧栏不是，不管三个都统一成什么样，都得统一成设置里用户调的样式」
+
+**改之前的现状**（三套模型）：顶栏胶囊与 tab 座各写各的常驻循环（delay 算式各算一遍），侧栏 glyph 走 burst 抽签（`motionBursts` 每 tick 掷 `Math.random()`、`MOTION_CONCURRENCY=4` 限并发）——同一个会话在三个表面上是三段各跑各的动画，且 `frequency` 在侧栏是「抽中的概率」、在另两处另有语义。
+
+**怎么改的**：新增四个纯函数 `motionTempoOf` / `motionDurationOf` / `motionDelayCss` / `motionPlanOf(settings, sessionId, category, motion, motionTarget)`，三处（侧栏 `applyMotion`、tab `decorateTabSeat`、顶栏 `topbarChips`+`topbarChipNode`）全部改从 `motionPlanOf` 取 `{motion, motionTarget, durationMs, delayMs, delayCss, animation, textAnimation}`；`frequency` 统一成节奏倍率 `duration = base / max(freq, 0.05)`；burst 全家（`motionBursts`/`startBurst`/`stopBurst`/`bandBursts`/`chipBursts`/`MOTION_CONCURRENCY`/`data-hotlist-burst`/`data-hotlist-chip-burst`）删除，`Math.random` 不再参与动效；`previewStyle` 改 tempo 语义；设置页文案「播放频率」→「节奏倍率」，写明三处一起变。`VERSION`→5.3.5，`SETTINGS_VERSION` 仍 4。
+
+**已统一，不许再动**：三处同 keyframes、同 duration、同相位种子（`fnv1a(sessionId|category)`）是 5.3.5 的定稿口径；「侧栏想恢复随机脉冲」「三处各自独立调频」「频率恢复成抽签概率」都属于倒退，不要再以「更热闹」为理由改。
+
 ## 2026-11-15 13:10 · 出厂 surfaces 与「全开」旧存档
 
 **用户的纠正**：「这个热表的这个默认值也有问题」「你告诉我哪一版的默认设置是我目前这个环境里面这样的」

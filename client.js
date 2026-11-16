@@ -42,8 +42,12 @@
  * Sidebar glyphs: emoji through `::before{content:attr(data-hotlist-char)}` or a
  * static `<img>`, both animating through the same CSS keyframes on the outer
  * span. Motion is pure CSS (`transform`/`opacity` only), pauses through root
- * attributes while the page is hidden, respects reduce-motion, and fires one
- * single-shot burst per category at most `MOTION_CONCURRENCY` at a time. `motionTarget: 'row'` also drives the
+ * attributes while the page is hidden, and respects reduce-motion. One shared
+ * motion model (5.3.5): the band pill, the tab seat and the sidebar glyph all
+ * derive their animation from the same `motionPlanOf` — same keyframes, same
+ * duration (base tempo divided by `frequency`), same phase
+ * (`fnv1a(sessionId|category)`), so one session looks like one animation on
+ * every surface. `motionTarget: 'row'` also drives the
  * host title span inline (opacity/translate only — text never scales). The
  * conversation tab label is a host-rendered string, so it can never animate.
  * `takeOverStatusDot` hides another plugin's `data-dsm-dot` through a
@@ -79,7 +83,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.3.4';
+    const VERSION = '5.3.5';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -309,10 +313,16 @@ window.__ModuleLoader__.load({
     /** What a glyph shows: an emoji, an uploaded image, or that category's popout artwork. */
     const GLYPH_SOURCES = ['emoji', 'upload', 'popout'];
     /**
-     * How often a category bursts: `1` fires on every tick, `0` never animates.
-     * Each category rolls once per tick, so the slider is a playback frequency.
+     * The playback slider is one shared **tempo**, not a lottery: `1` is the base
+     * tempo of a motion, lower is slower, and `0` is the explicit "never animate
+     * this class" switch. Every surface divides the same base duration by it, so
+     * moving this slider changes the band, the tab row and the sidebar together.
      */
     const MOTION_FREQUENCY = { min: 0, max: 1, step: 0.05, fallback: 1 };
+    /** The tempo the slider can ask for: 5% is 20× slower than 100%. */
+    const MOTION_TEMPO = { min: 0.05, max: 1 };
+    /** Timing function per motion: the same one on all three surfaces, or the beat drifts. */
+    const MOTION_TIMING = { spin: 'linear', pulse: 'ease-in-out', bounce: 'ease-in-out', blink: 'ease-in-out' };
     /** Builds up to 4.3 stored an average interval; 2000ms meant "as often as possible". */
     const LEGACY_INTERVAL_MS = { min: 2000, max: 60000 };
     const POPOUT_ENTRANCES = ['slide', 'unfold', 'overshoot', 'fade'];
@@ -339,9 +349,14 @@ window.__ModuleLoader__.load({
      * the API keep 0 as "no window" for a caller that asks for it explicitly; the row never shows 0.
      */
     const RECENT_WINDOW_UI = { min: 1, max: 120 };
-    /** One-slot animation bursts: never more than this many glyphs animating at once. */
-    // four titles moving at once is the readability ceiling; frequency decides how often.
-    const MOTION_CONCURRENCY = 4;
+    /**
+     * One shared motion model (5.3.5): the band pill, the tab seat and the
+     * sidebar glyph all run the *same* continuous animation for a category —
+     * same keyframes, same duration, same phase. `frequency` is one shared
+     * tempo the three of them divide their base duration by; `motionTarget`
+     * says which node carries it. `0` is the explicit off switch.
+     */
+    // frequency decides the tempo (see MOTION_TEMPO); nothing rolls a lottery here.
     const OVERLAY_SIDES = ['auto', 'left', 'right'];
     /** Popout artwork is sized in CSS px; the two bounds clamp a single global min/max pair. */
     const OVERLAY_SIZE = { min: 120, max: 900, fallbackMin: 260, fallbackMax: 520 };
@@ -907,7 +922,7 @@ window.__ModuleLoader__.load({
         topbar: { mode: 'chips', titleMode: 'custom', maxSeats: 6, previewInWeb: false, rightReservePx: TOPBAR_RESERVE.fallback, chipWidthPct: CHIP_PCT.fallback, customScope: defaultCustomScope() },
         takeOverStatusDot: true,
         hideNativeDot: true,
-        /** Bursts are per-category: each one rolls its own `glyph.frequency` on every tick. */
+        /** One shared tempo (5.3.5): `glyph.frequency` moves the top bar, the tab row and the sidebar together. */
         display: { reduceMotion: 'auto' },
         shortcuts: { jumpEnabled: true, overlayEnabled: false, overlayKey: 'Alt+Shift+S' },
         overlay: { side: 'auto', sizeMin: OVERLAY_SIZE.fallbackMin, sizeMax: OVERLAY_SIZE.fallbackMax, fallbackImage: '' },
@@ -1046,8 +1061,8 @@ window.__ModuleLoader__.load({
       'settings.motionTarget': '作用于',
       'settings.motionTarget.glyph': '仅图标',
       'settings.motionTarget.row': '图标+标题',
-      'settings.frequency': '播放频率',
-      'settings.frequencyHint': '0% 不播；100% 每个节拍都播，越往左越稀。',
+      'settings.frequency': '节奏倍率',
+      'settings.frequencyHint': '0% 停；100% 原速；越低越慢。顶栏、Tab 栏、侧栏三处一起变。',
       'settings.glyphFollowHint': '跟随',
       'settings.position.tab': '对话区 tab 行',
       'settings.position.tabHint': '显示在对话区上方；桌面版与网页版都可用。',
@@ -1268,8 +1283,8 @@ window.__ModuleLoader__.load({
       'settings.motionTarget': 'Applies to',
       'settings.motionTarget.glyph': 'Glyph only',
       'settings.motionTarget.row': 'Glyph + title',
-      'settings.frequency': 'Playback frequency',
-      'settings.frequencyHint': '0% never plays; 100% fires every beat. Further left is rarer.',
+      'settings.frequency': 'Tempo',
+      'settings.frequencyHint': '0% stops; 100% is the base speed; lower is slower. The top bar, the tab row and the sidebar all change together.',
       'settings.glyphFollowHint': 'Follows',
       'settings.position.tab': 'Conversation tab row',
       'settings.position.tabHint': 'Shown above the conversation area; available in both the desktop app and a web page.',
@@ -1457,7 +1472,7 @@ window.__ModuleLoader__.load({
       'settings.popout.entranceFixed': 'Fixed: peek reveal',
     };
 
-const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/;
+    const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/;
 
     const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -2009,15 +2024,73 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     }
 
     /**
-     * One deterministic start offset per (sessionId, category): the band and the
-     * tab row open the same keyframe at the same point, so the two surfaces of
-     * one session always look like one animation. `frequency` says when a motion
-     * may run, `motionTarget` says which node moves, and this says where in the
-     * cycle it starts; the three never overlap.
+     * One deterministic start offset per (sessionId, category): the band, the tab
+     * row and the sidebar glyph open the same keyframe at the same point, so all
+     * three surfaces of one session always look like one animation. `durationMs`
+     * already carries the shared tempo; this says where in the cycle it starts.
      */
     function motionPhaseOf(sessionId, category, durationMs) {
       if (Number.isFinite(durationMs) === false || durationMs <= 0) return 0;
       return fnv1a(String(sessionId) + '|' + String(category)) % Math.round(durationMs);
+    }
+
+    /** The tempo the slider asks for: `0` is the explicit off switch, both bounds are inclusive. */
+    function motionTempoOf(frequency) {
+      if (!(frequency > 0)) return 0;
+      return clamp(frequency, MOTION_TEMPO.min, MOTION_TEMPO.max);
+    }
+
+    /** How long one cycle lasts `frequency` faster or slower than the base tempo. */
+    function motionDurationOf(motion, frequency) {
+      const base = MOTION_MS[motion] ?? 0;
+      const tempo = motionTempoOf(frequency);
+      if (base === 0 || tempo === 0) return 0;
+      return Math.round(base / tempo);
+    }
+
+    /** The one negative delay spelling all three surfaces write, so equality is a string compare. */
+    function motionDelayCss(phaseMs) {
+      return `calc(-1 * ${Math.round(phaseMs)}ms)`;
+    }
+
+    /**
+     * **One motion, three surfaces** (5.3.5). The band pill, the tab seat and the
+     * sidebar glyph all ask this function instead of each deriving its own idea:
+     *
+     *   - `motion` / `motionTarget` — the caller's resolved pick (e.g. a `question`
+     *     token resolves to `glyphSecondary`), falling back to the category glyph;
+     *   - `durationMs` — the base duration divided by the shared tempo (`frequency`),
+     *     so the slider moves all three at once instead of only the sidebar;
+     *   - `delayMs` — the same seed `fnv1a(sessionId|category)` for all three, so one
+     *     session in one class opens the keyframe at the same point everywhere.
+     *
+     * `animation` / `textAnimation` are the exact strings a surface writes inline;
+     * building them here is what keeps `animation-name`, `duration` and `delay`
+     * identical by construction rather than by three copies agreeing.
+     */
+    function motionPlanOf(settings, sessionId, category, motion = null, motionTarget = null) {
+      const entry = settings?.categories?.[category];
+      const glyph = entry?.glyph ?? {};
+      const resolvedMotion = motion ?? glyph.motion;
+      const resolvedTarget = motionTarget ?? glyph.motionTarget;
+      const motionName = MOTION_NAMES.includes(resolvedMotion) ? resolvedMotion : 'none';
+      const target = MOTION_TARGETS.includes(resolvedTarget) ? resolvedTarget : 'glyph';
+      const off = motionName === 'none' || settings?.display?.reduceMotion === 'on';
+      const durationMs = off ? 0 : motionDurationOf(motionName, glyph.frequency);
+      if (durationMs === 0) {
+        return { motion: 'none', motionTarget: target, durationMs: 0, delayMs: 0, delayCss: '0ms', animation: '', textAnimation: '' };
+      }
+      const delayMs = motionPhaseOf(sessionId, category, durationMs);
+      const timing = MOTION_TIMING[motionName] ?? 'linear';
+      return {
+        motion: motionName,
+        motionTarget: target,
+        durationMs,
+        delayMs,
+        delayCss: motionDelayCss(delayMs),
+        animation: `hl-${motionName} ${durationMs}ms ${timing} infinite`,
+        textAnimation: `hl-text-${motionName} ${durationMs}ms ${timing} infinite`,
+      };
     }
 
     /** A pool index from a seed: same seed, same picture, so a repaint never flickers. */
@@ -3358,8 +3431,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     const KIND_ATTR = 'data-hotlist-glyph-kind';
     const STATE_ATTR = 'data-hotlist-state';
     const MOTION_ATTR = 'data-hotlist-motion';
-    /** Marks the one span currently playing a single-shot burst (CSS uses iteration 1). */
-    const BURST_ATTR = 'data-hotlist-burst';
     const TEXT_MOTION_ATTR = 'data-hotlist-text-motion';
     const STYLE_ATTR = 'data-hotlist-style';
     const HIDE_NATIVE_ATTR = 'data-hotlist-hide-native';
@@ -3369,29 +3440,12 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     const MAX_MISSES = 60;
     const MISS_RETRY_MS = 30 * 1000;
     const SIDEBAR_TICK_MS = 1000;
-    /** How long one burst animation runs; the attribute is dropped again afterwards. */
+    /** How long one animation cycle runs at the base tempo; the shared slider divides it. */
     const MOTION_MS = { spin: 2400, pulse: 1600, bounce: 1200, blink: 1200 };
     /** Full repaint cadence; store changes and DOM mutations repaint much sooner. */
     const SIDEBAR_REFRESH_MS = 30 * 1000;
     /** A live run failure stays visible for half an hour unless the session runs again. */
     const SIDEBAR_ERROR_TTL_MS = 30 * 60 * 1000;
-    /**
-     * Text variants: no `scale` on text (it looks blurry), so each one is a small
-     * translate plus an opacity wave; the glyph itself keeps the full motion.
-     */
-    const TEXT_MOTION = {
-      spin: 'hl-text-spin 2.4s linear infinite',
-      pulse: 'hl-text-pulse 1.6s ease-in-out infinite',
-      bounce: 'hl-text-bounce 1.2s ease-in-out infinite',
-      blink: 'hl-text-blink 1.2s ease-in-out infinite',
-    };
-    /** The same four variants, played once: a burst must not keep the title moving. */
-    const TEXT_BURST = {
-      spin: 'hl-text-spin 2.4s linear 1',
-      pulse: 'hl-text-pulse 1.6s ease-in-out 1',
-      bounce: 'hl-text-bounce 1.2s ease-in-out 1',
-      blink: 'hl-text-blink 1.2s ease-in-out 1',
-    };
     const SIDEBAR_STYLE = [
       `[${GLYPH_ATTR}]{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:0 0 16px;margin-right:2px;transform-origin:center}`,
       `[${GLYPH_ATTR}]::before{content:attr(${CHAR_ATTR});display:block;font-size:14px;line-height:16px}`,
@@ -3401,10 +3455,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       `[${GLYPH_ATTR}][${MOTION_ATTR}="pulse"]{animation:hl-pulse 1.6s ease-in-out infinite;will-change:transform}`,
       `[${GLYPH_ATTR}][${MOTION_ATTR}="bounce"]{animation:hl-bounce 1.2s ease-in-out infinite;will-change:transform}`,
       `[${GLYPH_ATTR}][${MOTION_ATTR}="blink"]{animation:hl-blink 1.2s ease-in-out infinite}`,
-      `[${GLYPH_ATTR}][${BURST_ATTR}][${MOTION_ATTR}="spin"]{animation:hl-spin 2.4s linear 1}`,
-      `[${GLYPH_ATTR}][${BURST_ATTR}][${MOTION_ATTR}="pulse"]{animation:hl-pulse 1.6s ease-in-out 1}`,
-      `[${GLYPH_ATTR}][${BURST_ATTR}][${MOTION_ATTR}="bounce"]{animation:hl-bounce 1.2s ease-in-out 1}`,
-      `[${GLYPH_ATTR}][${BURST_ATTR}][${MOTION_ATTR}="blink"]{animation:hl-blink 1.2s ease-in-out 1}`,
       `${ROW_SELECTOR}[${HIDE_NATIVE_ATTR}] > span:first-child [data-state]{display:none !important}`,
       `html[${MOTION_PAUSED_ATTR}] [${GLYPH_ATTR}],html[${MOTION_PAUSED_ATTR}] [${TEXT_MOTION_ATTR}]{animation-play-state:paused !important}`,
       `html[${REDUCE_MOTION_ATTR}] [${GLYPH_ATTR}],html[${REDUCE_MOTION_ATTR}] [${TEXT_MOTION_ATTR}]{animation:none !important;will-change:auto !important}`,
@@ -3702,6 +3752,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         if (record === void 0) return;
         textAnimated.delete(title);
         title.style.animation = record.previous;
+        title.style.animationDelay = record.previousDelay;
         title.removeAttribute(TEXT_MOTION_ATTR);
       }
 
@@ -3786,86 +3837,44 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         else root.removeAttribute(REDUCE_MOTION_ATTR);
       }
 
-      /** sessionId -> {timer}: the one burst this span is playing; clears itself on a timer. */
-      const burstMotion = new Map();
-      /** Rows of the last repaint: the cadence timer bursts from these, not from a DOM read. */
-      let lastRows = [];
-
+      /** One shared motion model (5.3.5): the sidebar glyph is no longer a burst lottery.
+       * It follows the same plan as the band pill and the tab seat — same keyframes,
+       * same duration (base / shared tempo), same seed-derived phase. */
       function quietTakeoverDots(row) {
         const dots = typeof row.querySelectorAll === 'function' ? row.querySelectorAll('[data-dsm-dot]') : [];
         for (const dot of dots) quietDot(dot);
       }
 
-      function animateTitle(marker, motion, once) {
+      function animateTitle(marker, plan) {
         const title = marker.title;
         if (title === null || typeof title.style !== 'object') return;
         const record = textAnimated.get(title);
-        if (record === undefined) textAnimated.set(title, { previous: title.style.animation ?? '' });
+        if (record === undefined) textAnimated.set(title, { previous: title.style.animation ?? '', previousDelay: title.style.animationDelay ?? '' });
         title.setAttribute(TEXT_MOTION_ATTR, '');
-        title.style.animation = (once === true ? TEXT_BURST : TEXT_MOTION)[motion] ?? 'none';
+        title.style.animation = plan.textAnimation;
+        title.style.animationDelay = plan.delayCss;
       }
 
-      function stopBurst(sessionId) {
-        const burst = burstMotion.get(sessionId);
-        if (burst === void 0) return;
-        clearTimeout(burst.timer);
-        burstMotion.delete(sessionId);
-        const marker = markers.get(sessionId);
-        if (marker === void 0) return;
-        marker.host.removeAttribute(BURST_ATTR);
-        marker.host.setAttribute(MOTION_ATTR, 'none');
-        restoreTextMotion(marker.title);
-      }
-
-      function startBurst(item, motion, settings) {
-        const marker = markers.get(item.sessionId);
-        const duration = MOTION_MS[motion] ?? 0;
-        if (marker === void 0 || duration === 0) return;
-        const timer = setTimeout(() => stopBurst(item.sessionId), duration);
-        burstMotion.set(item.sessionId, { timer });
-        marker.host.setAttribute(MOTION_ATTR, motion);
-        marker.host.setAttribute(BURST_ATTR, '');
-        if (tokenMotion(settings, item.state).motionTarget === 'row') animateTitle(marker, motion, true);
-      }
-
-      /** One roll per category per tick; at most `MOTION_CONCURRENCY` spans move at any time. */
-      function motionBursts(rows) {
-        const settings = readSettingsRef();
-        if (settings.display.reduceMotion === 'on') {
-          for (const sessionId of [...burstMotion.keys()]) stopBurst(sessionId);
-          return;
-        }
-        const byCategory = new Map();
-        for (const item of rows) {
-          const category = CATEGORY_OF_TOKEN[item.state];
-          if (category === void 0) continue;
-          const list = byCategory.get(category);
-          if (list === void 0) byCategory.set(category, [item]);
-          else list.push(item);
-        }
-        for (const [category, items] of byCategory) {
-          const frequency = settings.categories[category].glyph.frequency;
-          if (!(frequency > 0)) continue;
-          const roll = Math.random();
-          if (roll >= frequency) continue;
-          if (burstMotion.size >= MOTION_CONCURRENCY) continue;
-          const ready = items.filter((item) => !burstMotion.has(item.sessionId)
-            && tokenMotion(settings, item.state).motion !== 'none');
-          if (ready.length === 0) continue;
-          /** The same roll picks the span: one random call per category per tick. */
-          const item = ready[Math.min(ready.length - 1, Math.floor((roll / frequency) * ready.length))];
-          startBurst(item, tokenMotion(settings, item.state).motion, settings);
-        }
-      }
-
-      /** Static pass: anything not currently bursting has no animations at all. */
+      /** Continuous pass: every row wears its plan's motion, duration and phase. */
       function applyMotion(settings, rows) {
         for (const item of rows) {
-          if (burstMotion.has(item.sessionId)) continue;
           const marker = markers.get(item.sessionId);
           if (marker === void 0) continue;
-          if (marker.host.getAttribute?.(MOTION_ATTR) !== 'none') marker.host.setAttribute(MOTION_ATTR, 'none');
-          restoreTextMotion(marker.title);
+          const category = CATEGORY_OF_TOKEN[item.state];
+          if (category === void 0) continue;
+          const moved = tokenMotion(settings, item.state);
+          const plan = motionPlanOf(settings, item.sessionId, category, moved.motion, moved.motionTarget);
+          marker.host.setAttribute(MOTION_ATTR, plan.motion);
+          if (plan.motion === 'none') {
+            marker.host.style.animationDuration = '';
+            marker.host.style.animationDelay = '';
+            restoreTextMotion(marker.title);
+            continue;
+          }
+          marker.host.style.animationDuration = `${plan.durationMs}ms`;
+          marker.host.style.animationDelay = plan.delayCss;
+          if (plan.motionTarget === 'row') animateTitle(marker, plan);
+          else restoreTextMotion(marker.title);
         }
       }
 
@@ -3961,7 +3970,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           if (!rowsNow.some((item) => item.row === marker.row)) dropMarker(sessionId);
         }
         applyMotion(settings, rowsNow);
-        lastRows = rowsNow;
         if (rows.length > 0 && rowsNow.length === 0) misses += 5;
         if (misses >= MAX_MISSES) disable();
       }
@@ -4006,8 +4014,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           observer.disconnect?.();
           observer = null;
         }
-        for (const sessionId of [...burstMotion.keys()]) stopBurst(sessionId);
-        lastRows = [];
         for (const sessionId of [...markers.keys()]) dropMarker(sessionId);
         restoreDots();
         for (const title of [...textAnimated.keys()]) restoreTextMotion(title);
@@ -4057,7 +4063,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         const paused = documentRef.hidden === true;
         if (root !== null && root !== undefined && paused) root.setAttribute(MOTION_PAUSED_ATTR, '');
         else root?.removeAttribute?.(MOTION_PAUSED_ATTR);
-        if (paused === false) motionBursts(lastRows);
         /** Only the visibility flip needs a repaint; the cadence timer covers the rest. */
         if (paused !== pausedBefore) {
           pausedBefore = paused;
@@ -4104,7 +4109,7 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
     const COMPLETED_AT_KEY = /dsh.hotlist.completedAt.v1/;
     /** Coalesces a burst of finishes into one write. */
     const COMPLETED_FLUSH_MS = 500;
-    /** Preview loops: the motion fills `frequency` of the cycle, so the slider reads as density. */
+    /** Preview loops: the shared tempo model (5.3.5) — the full motion plays, `frequency` only slows it. */
     const PREVIEW_STEPS = 20;
     const PREVIEW_FRAMES = {
       spin: [[0, 'rotate(0deg)'], [1, 'rotate(360deg)']],
@@ -4130,11 +4135,11 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
 
     const PREVIEW_KEYFRAMES = previewKeyframes();
 
-    /** The cycle the sidebar runs: motion for `frequency` of the period, still for the rest. */
+    /** The cycle all three surfaces run: full motion, `frequency` scales the tempo (5.3.5). */
     function previewStyle(motion, frequency) {
-      const step = clamp(Math.round(frequency * PREVIEW_STEPS), 1, PREVIEW_STEPS);
-      const duration = Math.round((MOTION_MS[motion] ?? 1200) * PREVIEW_STEPS / step);
-      return `hl-pv-${motion}-${step} ${duration}ms linear infinite`;
+      const duration = motionDurationOf(motion, frequency);
+      if (duration === 0) return 'none';
+      return `hl-pv-${motion}-${PREVIEW_STEPS} ${duration}ms linear infinite`;
     }
     /** Upload gate: static raster only; 16KB is enforced after canvas compression. */
     const GLYPH_FILE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -6724,10 +6729,8 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
          * hourglass frozen. The rule is "the emoji in this tab always moves when
          * its category has a motion".
          */
-        const phase = moved.motion !== 'none'
-          ? motionPhaseOf(seat.sessionId, category, MOTION_MS[moved.motion] ?? 1200)
-          : 0;
-        const delay = moved.motion !== 'none' ? 'calc(-1 * ' + phase + 'ms)' : void 0;
+        const plan = motionPlanOf(settings, seat.sessionId, category, moved.motion, moved.motionTarget);
+        const delay = plan.motion !== 'none' ? plan.delayCss : void 0;
         for (const button of row.querySelectorAll('[role="tab"]')) {
           const textNode = findTabLabelTextNode(button, wanted);
           if (textNode === null) continue;
@@ -6755,8 +6758,10 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             parent.insertBefore(glyph, textNode);
           }
           if (glyph.textContent !== shown) glyph.textContent = shown;
-          if (glyph.getAttribute('data-hotlist-motion') !== moved.motion) glyph.setAttribute('data-hotlist-motion', moved.motion);
-          if (glyph.style.animationDelay !== delay) glyph.style.animationDelay = delay;
+          if (glyph.getAttribute('data-hotlist-motion') !== plan.motion) glyph.setAttribute('data-hotlist-motion', plan.motion);
+          if (glyph.style.animationDelay !== delay) glyph.style.animationDelay = delay ?? '';
+          if (plan.motion === 'none') glyph.style.animationDuration = '';
+          else if (glyph.style.animationDuration !== `${plan.durationMs}ms`) glyph.style.animationDuration = `${plan.durationMs}ms`;
           /** One emoji, never two: the host text keeps only the title. */
           if (textNode.textContent !== wanted) textNode.textContent = wanted;
           return;
@@ -6917,7 +6922,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
        */
       let topbarModel = {
         chips: [],
-        bursts: new Map(),
         mode: 'chips',
         titleMode: 'custom',
         reserve: TOPBAR_RESERVE.fallback,
@@ -6997,18 +7001,20 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
             : mode === 'text' || token === null
               ? ''
               : emojiOf(settings, token);
-          /** A pill with no glyph has nothing to move, so it never wins the lottery. */
+          /** A pill with no glyph has nothing to move, so it has no motion at all. */
           const moved = shown === '' || token === null || reduced
             ? { motion: 'none', motionTarget: 'glyph' }
             : tokenMotion(settings, token);
+          /** The same plan the tab seat and the sidebar glyph use: one phase for all three. */
+          const plan = motionPlanOf(settings, seat.sessionId, category, moved.motion, moved.motionTarget);
           chips.push({
             id: seat.sessionId,
             category,
             title: stripLeadingEmoji(seat.title),
             emoji: shown,
-            motion: moved.motion,
-            motionTarget: moved.motionTarget,
-            frequency: settings.categories[category].glyph.frequency,
+            motion: plan.motion,
+            motionTarget: plan.motionTarget,
+            plan,
           });
         }
         return chips;
@@ -7016,14 +7022,8 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
 
       function publishTopbar(snapshot, settings, plan) {
         const chips = topbarChips(settings, plan);
-        /** A pill that left the band takes its burst with it. */
-        const live = new Set(chips.map((chip) => chip.id));
-        for (const sessionId of [...chipBursts.keys()]) {
-          if (live.has(sessionId) === false) stopChipBurst(sessionId);
-        }
         topbarModel = {
           chips,
-          bursts: new Map(chipBursts),
           mode: settings.topbar.mode,
           titleMode: settings.topbar.titleMode,
           reserve: settings.topbar.rightReservePx,
@@ -7092,7 +7092,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
       }
 
       function topbarChipNode(chip) {
-        const burst = topbarModel.bursts.get(chip.id);
         const attrs = {
           key: chip.id,
           type: 'button',
@@ -7110,16 +7109,14 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
           attrs['data-hotlist-chip-motion'] = chip.motion;
           attrs['data-hotlist-chip-target'] = chip.motionTarget === 'row' ? 'row' : 'emoji';
         }
-        if (burst !== void 0) attrs['data-hotlist-chip-burst'] = '';
         /** Same deterministic phase as the tab row: both open the keyframe at the same point. */
-        const delay = chip.motion !== void 0 && chip.motion !== 'none'
-          ? 'calc(-1 * ' + motionPhaseOf(chip.id, chip.category, MOTION_MS[chip.motion] ?? 1200) + 'ms)'
-          : void 0;
+        const delay = chip.plan !== void 0 && chip.plan.motion !== 'none' ? chip.plan.delayCss : void 0;
+        const duration = chip.plan !== void 0 && chip.plan.motion !== 'none' ? `${chip.plan.durationMs}ms` : void 0;
         return h('button', attrs, [
           chip.emoji === '' || chip.emoji === void 0
             ? null
-            : h('span', { key: 'glyph', 'data-hotlist-chip-emoji': '', style: { fontSize: '14px', lineHeight: '24px', ...(chip.motionTarget !== 'row' && delay !== void 0 ? { animationDelay: delay } : {}) } }, chip.emoji),
-          h('span', { key: 'title', 'data-hotlist-chip-title': '', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', ...(chip.motionTarget === 'row' && delay !== void 0 ? { animationDelay: delay } : {}) } }, chipLabelOf(chip)),
+            : h('span', { key: 'glyph', 'data-hotlist-chip-emoji': '', style: { fontSize: '14px', lineHeight: '24px', ...(chip.motionTarget !== 'row' && delay !== void 0 ? { animationDelay: delay, animationDuration: duration } : {}) } }, chip.emoji),
+          h('span', { key: 'title', 'data-hotlist-chip-title': '', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', ...(chip.motionTarget === 'row' && delay !== void 0 ? { animationDelay: delay, animationDuration: duration } : {}) } }, chipLabelOf(chip)),
         ]);
       }
 
@@ -7223,17 +7220,15 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
        * `SIDEBAR_STYLE` is in the document only while the sidebar adapter runs,
        * and the band has to animate with the sidebar off.
        *
-       * Two layers, exactly like the sidebar glyph and the tab seat:
-       *
-       *   - **Always on** — a pill whose category has a motion animates for as long
-       *     as it is on screen (`infinite`). This is what the user asked for: the
-       *     band must not look frozen next to a moving sidebar icon. `emoji`
-       *     targets spin the glyph; `row` targets move the **title span** with the
-       *     `hl-text-*` variants (text only translates and fades, never scales — a
-       *     24 px pill has no room for a scale and text blurs).
-       *   - **Burst** — when that category's frequency rolls a hit, one single
-       *     shot (`1`) plays. The burst rules carry one more attribute selector,
-       *     so they outrank the always-on rule without `!important`.
+       * **Always on** — a pill whose category has a motion animates for as long
+       * as it is on screen (`infinite`). This is what the user asked for: the
+       * band must not look frozen next to a moving sidebar icon. `emoji`
+       * targets spin the glyph; `row` targets move the **title span** with the
+       * `hl-text-*` variants (text only translates and fades, never scales — a
+       * 24 px pill has no room for a scale and text blurs). Duration and phase
+       * come from the shared motion plan inline (`animation-duration`,
+       * `animation-delay`), so the pill, the tab seat and the sidebar glyph
+       * open the same keyframe at the same point.
        *
        * The `hl-*` / `hl-text-*` keyframes are the same definitions the sidebar
        * uses (a second identical `@keyframes` is inert); they are repeated here so
@@ -7248,14 +7243,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-title]{animation:hl-text-pulse 1.6s ease-in-out infinite}',
         '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out infinite}',
         '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-title]{animation:hl-text-blink 1.2s ease-in-out infinite}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-emoji]{animation:hl-spin 2.4s linear 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-emoji]{animation:hl-pulse 1.6s ease-in-out 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-emoji]{animation:hl-bounce 1.2s ease-in-out 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-emoji]{animation:hl-blink 1.2s ease-in-out 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-title]{animation:hl-text-spin 2.4s linear 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-title]{animation:hl-text-pulse 1.6s ease-in-out 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out 1}',
-        '[data-hotlist-chip][data-hotlist-chip-burst][data-hotlist-chip-target="row"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-title]{animation:hl-text-blink 1.2s ease-in-out 1}',
         '@keyframes hl-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
         '@keyframes hl-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}',
         '@keyframes hl-bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}70%{transform:translateY(0)}90%{transform:translateY(-1.5px)}}',
@@ -7283,54 +7270,6 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         if (style !== null) style.remove();
       }
 
-      /** sessionId -> the timeout that ends that pill's single shot. */
-      const chipBursts = new Map();
-      let chipTimer = null;
-
-      function publishBursts() {
-        topbarModel = { ...topbarModel, bursts: new Map(chipBursts) };
-        notifyTopbar();
-      }
-
-      function stopChipBurst(sessionId) {
-        const timer = chipBursts.get(sessionId);
-        if (timer === void 0) return;
-        clearTimeout(timer);
-        chipBursts.delete(sessionId);
-      }
-
-      function startChipBurst(chip) {
-        const timer = setTimeout(() => {
-          stopChipBurst(chip.id);
-          publishBursts();
-        }, MOTION_MS[chip.motion] ?? 1200);
-        chipBursts.set(chip.id, timer);
-        publishBursts();
-      }
-
-      /**
-       * The same lottery the sidebar runs (`motionBursts`), one roll per pill per
-       * second: `glyph.frequency` is the chance of a hit, `MOTION_CONCURRENCY`
-       * caps how many play at once, and a hit is one single shot — never a
-       * permanently spinning glyph. Reduced motion and a hidden window start
-       * nothing at all.
-       */
-      function bandBursts() {
-        if (topbarModel.chips.length === 0) return;
-        if (typeof document !== 'undefined' && document.hidden === true) return;
-        const settings = readSettings();
-        if (settings.display.reduceMotion === 'on') return;
-        for (const chip of topbarModel.chips) {
-          if (chipBursts.has(chip.id)) continue;
-          if (chipBursts.size >= MOTION_CONCURRENCY) break;
-          if (chip.motion === void 0 || chip.motion === 'none') continue;
-          const frequency = typeof chip.frequency === 'number' ? chip.frequency : 0;
-          if (frequency <= 0) continue;
-          if (Math.random() >= frequency) continue;
-          startChipBurst(chip);
-        }
-      }
-
       function mountTopbar() {
         if (topbarEntry !== null) return;
         if (ctx.slots.spec(TOPBAR_SLOT) === undefined) return;
@@ -7344,18 +7283,10 @@ const FULL_WIDTH = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-
         topbarEntry = { dispose };
         injectChipCss();
         startTopbarProbe();
-        /** One tick at once, so a fresh band moves before the first second is over. */
-        bandBursts();
-        chipTimer = setInterval(bandBursts, SIDEBAR_TICK_MS);
       }
 
       function disposeTopbar() {
         clearTopbarProbes();
-        if (chipTimer !== null) {
-          clearInterval(chipTimer);
-          chipTimer = null;
-        }
-        for (const sessionId of [...chipBursts.keys()]) stopChipBurst(sessionId);
         removeChipCss();
         if (topbarEntry === null) return;
         const entry = topbarEntry;
