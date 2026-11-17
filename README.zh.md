@@ -34,9 +34,9 @@ dsh --profile <profile>
 
 `Requires DSH ≥ 0.2.x` —— 确切写法待确认。
 
-- 包名 `dsh-better-notice`（模块 id 与包名相同）；版本 `5.3.6`；MIT。
+- 包名 `dsh-better-notice`（模块 id 与包名相同）；版本 `5.3.7`；MIT。
 - 设置位置：**账号菜单 →「设置」→ 左导航「热表」**。
-- 装完确认：控制台打 `window.__HOTLIST_VERSION__` 出 `'5.3.6'`、左导航有「热表」、会话栏每行行首多一枚状态图标。
+- 装完确认：控制台打 `window.__HOTLIST_VERSION__` 出 `'5.3.7'`、左导航有「热表」、会话栏每行行首多一枚状态图标。
 - npm 上有：`dsh-better-notice`。如果 npm 连不上，[最新 release](https://github.com/MeruSu/better-notice/releases) 附了同一个 tarball——`dsh plugin --profile <profile> add <绝对路径>/dsh-better-notice-5.3.2.tgz` 效果一样。
 - 从本地目录装用 `link:`（改代码不用重装），路径要**绝对路径 + 正斜杠**——`dsh plugin` 会把参数转发给 profile 目录里的 pnpm。
 - 卸载：`dsh plugin --profile <profile> remove dsh-better-notice`。
@@ -584,7 +584,7 @@ s.lastError()      // 最近一次写盘错误（字符串或 null）
 
 // 设置 + 三个素材池
 const api = window.__HOTLIST__;
-api.version                                        // '5.3.6'
+api.version                                        // '5.3.7'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }

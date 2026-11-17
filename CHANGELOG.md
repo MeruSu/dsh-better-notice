@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.3.7 — 2026-11-17
+
+**Packaging only: `engines.dsh` and `repository`.** This release adds
+`"engines": { "dsh": ">=0.2.2-rc.1 <0.3.0-0" }` so the host — and any directory
+that lists the plugin — can check up front that a compatible DSH is installed,
+and adds the `repository` field so npm and the GitHub repo cross-check as one
+project. Nothing else changed: no behaviour, no settings shape, no rendering, no
+sound. If you already run 5.3.6, installing 5.3.7 looks and acts exactly the
+same.
+
 ## 5.3.6 — 2026-11-17
 
 **修复：`frequency` 改回「多久播一次」，不是「动得多快」。** 用户原话：「动作频率又变成了动作速度？？？为什么老是改老代码还改错？？」——5.3.5 把频率直接除进时长（`duration = base / max(f, 0.05)`），于是把滑块往左拖是把**每一下的动作拉长**，用户要的是「更稀」，不是「更慢」。

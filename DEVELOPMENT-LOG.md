@@ -78,3 +78,17 @@
 - **已做**：tab 座位只动图标，`moveTitle` 恒假、`[data-hotlist-tab-title]` 只在清理旧 DOM 时出现（`client.js:6712-6772`）；第 97 组测试改名 `tab seats always move the glyph and never wrap the host title`（`test:5159`），第 98 组相位断言改读图标；文档同步（`docs/TESTING.md:155`、`docs/ARCHITECTURE.md:125`、`docs/EXTENDING.md:192`、CHANGELOG）。
 - **不许再动**：不要把 `motionTarget` 接回 tab 座位。宿主 tab 的 label 是宿主渲染并复用的字符串，包住它会打乱宿主布局，还会让图标停在 `none`。`motionTarget` 只属于侧栏行与顶栏胶囊。
 
+
+## 5.3.6 — 频率回归语义 + reduce 单一判据 + tab 行也动宿主标题
+
+- **用户的纠正原话**：「动作频率又变成了动作速度？？？为什么老是改老代码还改错？？」「设置页的图标的动效预览功能也没了，之前还有」「不然你就派一个人专门去审代码 看看是不是会有什么功能性回退」。
+- **查出的事实**：5.3.5 把 `glyph.frequency` 直接除进 `animation-duration`（`client.js:2079` 旧行 `durationMs = motionDurationOf(motionName, glyph.frequency)`），标签也改成「节奏倍率 / 越低越慢」；而 4.4 的原始语义是「0% 不播；100% 每个节拍都播」。同一轮里设置页预览的关键帧是 `0% { } 100% { }` 空块（`PREVIEW_FRAMES` 写成裸值 `rotate(0deg)` 缺属性名，被 CSS 解析器丢弃），所以「预览不动」真实存在，`animationName` 有值不等于在动。另 `display.reduceMotion` 三档压不过一条无条件的 `@media (prefers-reduced-motion: reduce)` 覆盖。
+- **已做**：f 只买静默、单次动作时长恒定（`motionDutyStep`/`motionPlayMs`/`motionDurationOf`/`motionRestMs`，`client.js:2041-2064`），20 档 `@keyframes` 由 `motionKeyframeRules` 统一生成（`:4205`）；reduce 收敛成 `motionAllowed()` 一处判据 + `html[data-hotlist-reduce-motion]`（`:5345`/`:5362`），删掉 5 处媒体查询；预览关键帧补 `transform:` 并加结构性回归；tab 行在「作用于=图标+标题」时**给宿主标题元素加类**来动文字（`TAB_LABEL_ATTR`/`findTabLabelTextNode`/`paintTabLabel`，`:6853-6933`），零 wrapper。
+- **不许再动**：`glyph.frequency` 不许再影响单次动画时长（只影响频次）；`f=1` 的关键帧与 5.3.5 逐停点相等已有基线测试钉住（`test:2477`）；reduce 判定只许走 `motionAllowed()`，不许再写媒体查询；tab 标题只能加类，不许包 wrapper / clone 节点。
+
+## 2026-11-17 · 闲置图标不做动效（用户拍板）
+
+- **用户的原话**：「行 不错 不需要给闲置的加动作」。
+- **查出的事实**：闲置类出厂就是 `categories.idle.glyph.motion = 'none'`、`frequency = 0`，所以卡片标题那颗 🧊 预览不动，`getComputedStyle().animationName === 'none'` 是正确的出厂行为，不是预览坏了。
+- **已做**：不改任何默认值。
+- **不许再动**：不要给闲置类加动效，也不要把「预览不动」当成缺陷去修。

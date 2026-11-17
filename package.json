@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-notice",
-  "version": "5.3.6",
+  "version": "5.3.7",
   "private": false,
   "description": "Better Notice — unified visual and audible session notices for DeepSeek Harness: hot-session tab seats, sidebar state glyphs, per-state sounds and popout artwork",
   "type": "module",
@@ -32,6 +32,13 @@
     "tab"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MeruSu/dsh-better-notice.git"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
