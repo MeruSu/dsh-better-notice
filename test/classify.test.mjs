@@ -221,6 +221,26 @@ function clearStyleBlocks() {
   for (const style of head.querySelectorAll('[data-hotlist-style]')) style.remove();
 }
 
+/**
+ * The body of one `@keyframes` block, brace-matched. A regex cannot do this: every
+ * keyframe body is itself a run of `{…}` stops, so a non-greedy `\\}\\}`-style
+ * pattern stops at the first stop and silently under-reports the table.
+ */
+function keyframeBody(css, name) {
+  const start = css.indexOf(`@keyframes ${name}{`);
+  if (start < 0) return '';
+  const from = css.indexOf('{', start);
+  let depth = 0;
+  for (let i = from; i < css.length; i += 1) {
+    if (css[i] === '{') depth += 1;
+    else if (css[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return css.slice(from + 1, i);
+    }
+  }
+  return '';
+}
+
 globalThis.document = {
   documentElement: html,
   head,
@@ -2362,7 +2382,7 @@ test('recent window migration and clamping', () => {
   assert.equal(api.classify(settings, input).filter((row) => row.category === 'idle').length, 1);
 });
 
-// 47. The preview loops while the card is open, and its tempo is the frequency.
+// 47. The preview loops while the card is open; `frequency` is a duty cycle, not a speed.
 test('preview loop lifecycle', () => {
   const glyphFor = (page, category) => collect(page, (props) => props.key === `glyph-${category}-primary`)
     .find((node) => node.props['data-hotlist-glyph'] !== undefined);
@@ -2373,12 +2393,17 @@ test('preview loop lifecycle', () => {
   api.writeSettings({ categories: { completed: { glyph: { motion: 'spin', frequency: 1 } } } });
   try {
     const full = renderPage();
-    assert.equal(glyphFor(full.page, 'completed').props.style.animation, 'hl-pv-spin-20 2400ms linear infinite', '100% plays every loop at the base tempo');
+    assert.equal(glyphFor(full.page, 'completed').props.style.animation, 'hl-spin-20 2400ms linear infinite', '100% plays every loop: one cycle is exactly one play');
     full.harness.cleanup();
 
     api.writeSettings({ categories: { completed: { glyph: { motion: 'spin', frequency: 0.5 } } } });
     const half = renderPage();
-    assert.equal(glyphFor(half.page, 'completed').props.style.animation, 'hl-pv-spin-20 4800ms linear infinite', '50% halves the tempo and doubles the period');
+    /**
+     * The play is still 2400ms of spin (`step 10` keeps the first half of the cycle
+     * moving); the cycle doubles because the other half is the new silence. That is
+     * what makes this a frequency and not a speed.
+     */
+    assert.equal(glyphFor(half.page, 'completed').props.style.animation, 'hl-spin-10 4800ms linear infinite', '50% keeps the play, adds an equal silence');
     half.harness.cleanup();
 
     /** A class at 0% renders a still glyph: the animation is not merely slow, it is absent. */
@@ -2387,14 +2412,172 @@ test('preview loop lifecycle', () => {
     assert.equal(glyphFor(still.page, 'completed').props.style.animation, undefined);
     still.harness.cleanup();
 
-    /** Reduce motion overrides the slider entirely. */
+    /**
+     * 5.3.6: reduce motion stops the four real surfaces and **never** the preview.
+     * The preview is the only place a user can see what the motion they picked
+     * looks like, so blanking it under `on` would turn the picker into a blind
+     * choice — the earlier expectation here (`undefined`) encoded exactly that
+     * bug. The real surfaces are asserted in their own groups (sidebar 39,
+     * the band and the tab row below), so this one only pins the exemption.
+     */
     api.writeSettings({ categories: { completed: { glyph: { motion: 'spin', frequency: 1 } } }, display: { reduceMotion: 'on' } });
     const reduced = renderPage();
-    assert.equal(glyphFor(reduced.page, 'pending').props.style.animation, undefined, 'reduce wins over a 100% frequency');
+    assert.equal(
+      glyphFor(reduced.page, 'completed').props.style.animation,
+      'hl-spin-20 2400ms linear infinite',
+      'the preview keeps playing under reduceMotion:on',
+    );
     reduced.harness.cleanup();
+    /**
+     * And the exemption is not "preview happens to be on" — `off` must not
+     * change the preview either, in the opposite direction.
+     */
+    api.writeSettings({ display: { reduceMotion: 'off' } });
+    const forced = renderPage();
+    assert.equal(
+      glyphFor(forced.page, 'completed').props.style.animation,
+      'hl-spin-20 2400ms linear infinite',
+      'the preview plays the same under reduceMotion:off',
+    );
+    forced.harness.cleanup();
   } finally {
     api.resetSettings();
   }
+});
+
+/**
+ * 47b. `frequency` is a **duty cycle**, never a speed (the 5.3.5 regression): one play
+ * always lasts `MOTION_MS[motion]`, the slider only decides how long the silence after
+ * it is. Both halves of that sentence are asserted separately, because "the duration
+ * went up" is exactly what a speed change looks like too.
+ */
+test('frequency is a duty cycle, not a speed', () => {
+  const plan = (category, frequency, motion = 'spin') => {
+    const settings = api.defaultSettings();
+    settings.categories[category].glyph.motion = motion;
+    settings.categories[category].glyph.frequency = frequency;
+    return api.motionPlanOf(settings, 'session-x', category);
+  };
+
+  /** One play is the same number for every frequency: this is the regression guard. */
+  for (const motion of ['spin', 'pulse', 'bounce', 'blink']) {
+    const plays = [1, 0.8, 0.5, 0.3, 0.05].map((frequency) => plan('pending', frequency, motion).playMs);
+    assert.deepEqual(plays, [plays[0], plays[0], plays[0], plays[0], plays[0]], `${motion}: the play length never changes with frequency`);
+  }
+  assert.equal(plan('pending', 0.3, 'bounce').playMs, 1200, 'a bounce play is 1200ms at 30% as well');
+
+  /** Play + silence = cycle, and the silence is what the slider actually buys. */
+  const full = plan('pending', 1, 'bounce');
+  assert.equal(full.durationMs, full.playMs, '100% has no silence');
+  assert.equal(full.restMs, 0, '100% rests for zero ms');
+  assert.equal(full.animationName, 'hl-bounce-20', '100% is the top duty step');
+
+  const three = plan('pending', 0.3, 'bounce');
+  assert.equal(three.step, 6, '30% is duty step 6 of 20');
+  assert.equal(three.playMs, 1200, 'the play is untouched');
+  assert.equal(three.restMs, 2800, 'the silence is play * (1 - f) / f = 2800ms');
+  assert.equal(three.durationMs, 4000, 'the cycle is play / f = 4000ms');
+  assert.equal(three.animationName, 'hl-bounce-6', 'a duty step names its own keyframes');
+
+  const half = plan('pending', 0.5, 'bounce');
+  assert.equal(half.restMs, half.playMs, '50% rests exactly as long as it plays');
+
+  /** 0 is the explicit off switch: no plan, no keyframes, nothing to hold. */
+  const off = plan('pending', 0, 'bounce');
+  assert.equal(off.motion, 'none');
+  assert.equal(off.step, 0);
+  assert.equal(off.playMs, 0);
+  assert.equal(off.durationMs, 0);
+  assert.equal(off.restMs, 0);
+  assert.equal(off.animationName, '', 'an off class names no keyframes');
+});
+
+/**
+ * 47c. The generated `@keyframes` at `frequency` 1 must reproduce the hand-written
+ * 5.3.5 table stop for stop. The baseline below is that table, copied verbatim: if
+ * this goes red, the "restore the semantics" change also moved the pixels.
+ */
+test('f=1 keyframes are the published 5.3.5 table', () => {
+  /** `rotate(0)` and `rotate(0deg)` are the same angle; the table spells it with the unit. */
+  const canon = (declaration) => declaration.replace(/rotate\(0\)/g, 'rotate(0deg)');
+  const BASELINE = {
+    'hl-spin-20': [[0, 'transform:rotate(0)'], [100, 'transform:rotate(360deg)']],
+    'hl-pulse-20': [[0, 'transform:scale(1)'], [50, 'transform:scale(1.12)'], [100, 'transform:scale(1)']],
+    'hl-bounce-20': [[0, 'transform:translateY(0)'], [40, 'transform:translateY(-3px)'], [70, 'transform:translateY(0)'], [90, 'transform:translateY(-1.5px)'], [100, 'transform:translateY(0)']],
+    'hl-blink-20': [[0, 'opacity:1'], [50, 'opacity:.35'], [100, 'opacity:1']],
+    'hl-text-spin-20': [[0, 'opacity:1;transform:translateY(0)'], [25, 'opacity:.7;transform:translateY(-1px)'], [75, 'opacity:.85;transform:translateY(1px)'], [100, 'opacity:1;transform:translateY(0)']],
+    'hl-text-pulse-20': [[0, 'opacity:1;transform:translateX(0)'], [50, 'opacity:.55;transform:translateX(1px)'], [100, 'opacity:1;transform:translateX(0)']],
+    'hl-text-bounce-20': [[0, 'opacity:1;transform:translateY(0)'], [40, 'opacity:.45;transform:translateY(-2px)'], [70, 'opacity:1;transform:translateY(0)'], [90, 'opacity:.9;transform:translateY(-1px)'], [100, 'opacity:1;transform:translateY(0)']],
+    'hl-text-blink-20': [[0, 'opacity:1;transform:none'], [50, 'opacity:.35'], [100, 'opacity:1;transform:none']],
+  };
+  const css = api.MOTION_KEYFRAMES;
+  for (const [name, stops] of Object.entries(BASELINE)) {
+    const body = keyframeBody(css, name);
+    assert.notEqual(body, '', `${name} is generated`);
+    const parsed = [...body.matchAll(/([\d.]+)%\{([^}]*)\}/g)].map((it) => [Number(it[1]), canon(it[2])]);
+    assert.deepEqual(parsed, stops.map(([at, declaration]) => [at, canon(declaration)]), `${name} matches the published table stop for stop`);
+  }
+});
+
+/**
+ * 47d. Guards on the duty table itself: every block has real stops (the 5.3.5 empty
+ * `@keyframes` bug), the silence is held on the last frame rather than interpolated,
+ * and the one play never gets stretched by a lower frequency.
+ */
+test('duty keyframes are well formed and hold the end frame', () => {
+  const css = api.MOTION_KEYFRAMES;
+  const names = [...css.matchAll(/@keyframes ([a-z-]+-\d+)\{/g)].map((it) => it[1]);
+  assert.equal(names.length, 8 * 20, 'four glyph motions and four title motions, twenty duty steps each');
+  assert.equal(new Set(names).size, names.length, 'every (motion, step) pair has exactly one block');
+
+  /** No block may be empty: that is the 5.3.5 bug this table replaced. */
+  assert.equal(/@keyframes [a-z-]+-\d+\{\}/.test(css), false, 'no empty @keyframes block');
+
+  for (const name of names) {
+    const body = keyframeBody(css, name);
+    assert.notEqual(body, '', `${name} has a body`);
+    const stops = [...body.matchAll(/([\d.]+|[a-z]+)%?\{([^}]*)\}/g)];
+    assert.notEqual(stops.length, 0, `${name} has stops`);
+    /** Every stop is a full declaration: a bare value is dropped by the parser. */
+    for (const stop of stops) {
+      assert.equal(/^[a-z-]+:\s*\S/.test(stop[2]), true, `${name} stop "${stop[2]}" is a full declaration`);
+    }
+  }
+
+  /** The silence holds the last frame: rotate(360deg) and rotate(0) are the same pixel. */
+  const spin10 = keyframeBody(css, 'hl-spin-10');
+  assert.equal(spin10.includes('50%{transform:rotate(360deg)}'), true, 'the play ends halfway at 50%');
+  assert.equal(spin10.includes('100%{transform:rotate(360deg)}'), true, 'the hold sits on the last frame, not on an angle in between');
+
+  const bounce10 = keyframeBody(css, 'hl-bounce-10');
+  assert.equal(bounce10.includes('50%{transform:translateY(0)}'), true, 'the last stop is reached at the end of the play');
+  assert.equal(bounce10.endsWith('100%{transform:translateY(0)}'), true, 'and then held');
+});
+
+/**
+ * 47e. Guard on the frame tables themselves (the lead's 5.3.5 hotfix is the cautionary
+ * tale): a frame that forgot its property name generated `@keyframes x{}`-shaped blocks
+ * whose stops the parser dropped — the animation ran with no visual change. Every frame
+ * of every motion must be `property: value`, and the moving ones must actually move
+ * `transform`, not merely fade.
+ */
+test('every motion frame is a property declaration with a value', () => {
+  const moving = ['spin', 'pulse', 'bounce'];
+  for (const motion of [...moving, 'blink']) {
+    for (const [at, declaration] of api.PREVIEW_FRAMES[motion]) {
+      assert.equal(/^[a-z-]+:\s*\S+$/.test(declaration), true, `glyph ${motion}@${at} is "property: value", got "${declaration}"`);
+    }
+    for (const [at, declaration] of api.MOTION_TEXT_FRAMES[motion]) {
+      for (const part of declaration.split(';')) {
+        assert.equal(/^[a-z-]+:\s*\S+$/.test(part), true, `title ${motion}@${at} part "${part}" is "property: value"`);
+      }
+    }
+  }
+  for (const motion of moving) {
+    assert.equal(api.PREVIEW_FRAMES[motion].some(([, declaration]) => declaration.startsWith('transform:')), true, `${motion} moves transform, not just opacity`);
+    assert.equal(api.MOTION_TEXT_FRAMES[motion].some(([, declaration]) => declaration.includes('transform:')), true, `title ${motion} moves transform too`);
+  }
+  assert.equal(api.PREVIEW_FRAMES.blink.every(([, declaration]) => declaration.startsWith('opacity:')), true, 'blink is an opacity motion by definition');
 });
 
 /**
@@ -2424,7 +2607,7 @@ test('motion target row reaches the title', () => {
   });
   try {
     adapter.start();
-    assert.equal(title.style.animation, 'hl-text-blink 1200ms ease-in-out infinite', 'the row target animates the title with the shared continuous plan');
+    assert.equal(title.style.animation, 'hl-text-blink-20 1200ms ease-in-out infinite', 'the row target animates the title with the shared continuous plan');
     assert.equal(title.hasAttribute('data-hotlist-text-motion'), true);
     assert.equal(title.style.animationDelay, `calc(-1 * ${api.motionPhaseOf('session-ask', 'pending', 1200)}ms)`, 'the title opens at the same seeded phase as the glyph');
     assert.equal(row.querySelectorAll('[data-hotlist-burst]').length, 0, 'row motion is not a burst');
@@ -2433,7 +2616,7 @@ test('motion target row reaches the title', () => {
     /** The text keyframes must actually move pixels; opacity alone is what made the option look broken. */
     const css = head.querySelectorAll('[data-hotlist-style]').map((node) => node.textContent).join('\n');
     assert.equal(css.includes('@keyframes hl-text-bounce'), true);
-    assert.equal(/@keyframes hl-text-bounce\{[^}]*translateY/.test(css), true, 'row motion needs a translate, not just an opacity wave');
+    assert.equal(keyframeBody(css, 'hl-text-bounce-20').includes('translateY'), true, 'row motion needs a translate, not just an opacity wave');
   } finally {
     adapter.stop();
     clearSidebarRows();
@@ -4148,25 +4331,43 @@ test('pills keep their class animation on the shared plan', () => {
     const css = chipStyleText();
     assert.notEqual(css, '', 'the band injects a stylesheet of its own');
     assert.ok(
-      css.includes('[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out infinite}'),
+      css.includes('[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}'),
       'the title animates for as long as the pill is on screen',
     );
     assert.equal(css.includes('data-hotlist-chip-burst'), false, 'the burst layer is gone from the stylesheet');
     for (const motion of ['spin', 'pulse', 'bounce', 'blink']) {
-      const timing = motion === 'spin' ? '2.4s linear' : motion === 'pulse' ? '1.6s ease-in-out' : '1.2s ease-in-out';
+      const timing = motion === 'spin' ? 'linear' : 'ease-in-out';
       const scale = motion === 'blink' ? '' : ';will-change:transform';
       assert.ok(
-        css.includes(`[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-emoji]{animation:hl-${motion} ${timing} infinite${scale}}`),
+        css.includes(`[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-emoji]{animation-timing-function:${timing};animation-iteration-count:infinite${scale}}`),
         `a glyph with ${motion} animates while it just sits there`,
       );
       assert.ok(
-        css.includes(`[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-title]{animation:hl-text-${motion} ${timing} infinite}`),
+        css.includes(`[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="${motion}"] [data-hotlist-chip-title]{animation-timing-function:${timing};animation-iteration-count:infinite}`),
         `a title with ${motion} has an always-on rule too`,
       );
-      assert.ok(css.includes(`@keyframes hl-text-${motion}`), `the band carries the hl-text-${motion} keyframe it references`);
+      /** The band no longer names a keyframe: the shared sheet owns every table, and JS
+       *  picks the duty variant inline. A name written here would ignore the frequency. */
+      assert.equal(css.includes(`animation:hl-${motion} `), false, `the ${motion} rule leaves the keyframe name to JS`);
+    }
+    const motionCss = head.querySelectorAll('[data-hotlist-style="motion"]').map((node) => node.textContent).join('\n');
+    for (const motion of ['spin', 'pulse', 'bounce', 'blink']) {
+      assert.ok(motionCss.includes(`@keyframes hl-${motion}-20`), `the shared sheet carries hl-${motion}-20`);
+      assert.ok(motionCss.includes(`@keyframes hl-text-${motion}-20`), `the shared sheet carries hl-text-${motion}-20`);
     }
     assert.equal(css.includes('hl-chip-nudge'), false, 'the band no longer nudges the whole pill');
-    assert.ok(css.includes('[data-hotlist-chip] *{animation:none !important}'), 'reduced motion reaches the glyph and the title');
+    /**
+     * 5.3.6: the reduce-motion rule is root-attribute driven and carries no
+     * `!important`. It used to be `…*{animation:none !important}`, which both
+     * beat an inline animation JS had no way to suppress and had a `@media`
+     * twin that made the product setting a no-op. Both are gone; see the
+     * source-level gate below for the "no media query comes back" half.
+     */
+    assert.ok(
+      css.includes(`html[${api.REDUCE_MOTION_ATTR}] [data-hotlist-chip] *{animation:none}`),
+      'reduced motion reaches the glyph and the title through the root attribute',
+    );
+    assert.equal(css.includes('!important'), false, 'the band CSS declares nothing as !important');
 
     const pill = () =>
       collect(harness.entries.get(api.TOPBAR_ID).Component({}), (props) => typeof props['data-hotlist-chip'] === 'string')[0];
@@ -5197,6 +5398,8 @@ test('audio config: the prompt never leaks a placeholder or a home directory', (
 });
 
 // 97. The tab seat always moves its glyph; the host title is never wrapped.
+//     (An older host puts the text node straight under the button, so there is
+//     no label element to mark: a `row` request falls back to the glyph.)
 test('tab seats always move the glyph and never wrap the host title', () => {
   tabRow.children.length = 0;
   const button = el('button');
@@ -5226,6 +5429,63 @@ test('tab seats always move the glyph and never wrap the host title', () => {
     api.writeSettings({ categories: { pinned: { glyph: { ...api.readSettings().categories.pinned.glyph, motionTarget: 'row' } } } });
     assert.equal(glyph().getAttribute('data-hotlist-motion'), 'bounce', 'back to row: the glyph keeps moving');
     assert.equal(title(), undefined, 'and the host title stays untouched');
+  } finally {
+    harness.cleanup();
+    tabRow.children.length = 0;
+    api.resetSettings();
+  }
+});
+
+// 97b. A `row` target on the tab row moves the host's own label span (§5.3.6):
+//      no wrapper, no clone, and the glyph never runs two transforms at once.
+test('a row target animates the host tab label, not a wrapper', () => {
+  tabRow.children.length = 0;
+  const button = el('button');
+  button.setAttribute('role', 'tab');
+  const label = el('span');
+  label.className = 'an3WzG_tabLabel';
+  const textNode = { nodeType: 3, textContent: '会话 tab-label', parentElement: label };
+  label.childNodes = [textNode];
+  button.appendChild(label);
+  button.childNodes = [label];
+  tabRow.appendChild(button);
+  const TITLE = 'data-hotlist-tab-label';
+  const ids = ['tab-label'];
+  const byId = { 'tab-label': session({ id: 'tab-label', displayTitle: '会话 tab-label', updatedAt: NOW }) };
+  const harness = createCtx({
+    list: { ids, byId },
+    statuses: new Map([['tab-label', { running: true, pendingInteraction: null, completionUnread: false }]]),
+    groups: { items: [{ workspaceId: 'w', sessionIds: ids }], archivedSessionIds: [], pinnedSessionIds: [], phase: 'ready' },
+  });
+  api.apply(harness.ctx, {});
+  try {
+    const glyph = () => label.children.find((child) => typeof child.hasAttribute === 'function' && child.hasAttribute('data-hotlist-tab-glyph'));
+    assert.equal(api.readSettings().categories.running.glyph.motionTarget, 'row', 'the shipped default is a row target');
+    assert.equal(label.getAttribute(TITLE), '', 'the host label span carries the mark');
+    assert.equal(label.getAttribute('data-hotlist-motion'), 'spin', 'and the motion the category asked for');
+    assert.equal(label.style.animationName, 'hl-text-spin-20', 'the label runs the text keyframe of its duty step');
+    assert.equal(label.style.animationDuration, '2400ms', 'the play length is the base, never divided by frequency');
+    assert.equal(glyph().style.animationName, '', 'the glyph rides the label instead of running its own transform');
+    assert.equal(glyph().getAttribute('data-hotlist-motion'), 'none', 'and is marked still');
+    assert.equal(button.children.length, 1, 'no wrapper was inserted under the button');
+    assert.equal(label.children.filter((child) => child !== glyph()).length, 0, 'nothing wraps the text node itself');
+
+    api.writeSettings({ categories: { running: { glyph: { ...api.readSettings().categories.running.glyph, motionTarget: 'glyph' } } } });
+    assert.equal(label.getAttribute(TITLE), null, 'a glyph target hands the label back untouched');
+    assert.equal(label.style.animationName, '', 'including its animation name');
+    assert.equal(glyph().style.animationName, 'hl-spin-20', 'and moves the glyph instead');
+
+    api.writeSettings({ categories: { running: { glyph: { ...api.readSettings().categories.running.glyph, motionTarget: 'row' } } } });
+    api.writeSettings({ display: { reduceMotion: 'on' } });
+    assert.equal(label.style.animationName, '', 'reduce motion stops the label text too');
+    assert.equal(glyph().style.animationName, '', 'and the glyph with it');
+
+    const source = readFileSync(new URL('./../client.js', import.meta.url), 'utf8');
+    assert.equal(
+      source.includes(`'] [' + TAB_LABEL_ATTR + ']{animation:none}'`),
+      true,
+      'the root-attribute reduce rule covers the host label span as well',
+    );
   } finally {
     harness.cleanup();
     tabRow.children.length = 0;
@@ -5415,6 +5675,93 @@ test('frequency moves all three surfaces together', () => {
     clearStyleBlocks();
     api.resetSettings();
   }
+});
+
+/**
+ * 47f. Reduce motion: **one** judgement, three modes, and the preview exempt.
+ *
+ * 5.3.6 replaced five `@media (prefers-reduced-motion:reduce)` blocks with one
+ * root attribute driven by `motionAllowed`. Two things could regress silently:
+ *
+ *  1. a media query coming back anywhere in the generated CSS — the
+ *     missing-group reveal is pure CSS and cannot be reached by a DOM
+ *     assertion, so a string gate is the only cheap guard. One assertion
+ *     covers all five surfaces;
+ *  2. someone "unifying" the preview into `motionAllowed`, which would blank
+ *     the only place a user can see the motion they just picked.
+ *
+ * Both are asserted from the module source and its exported CSS constants,
+ * because neither shows up as a wrong DOM value.
+ */
+test('reduce stops the real surfaces and never the preview', () => {
+  const matchMedia = (matches) => ({ matchMedia: () => ({ matches }) });
+
+  assert.equal(api.motionAllowed({ display: { reduceMotion: 'on' } }, matchMedia(false)), false, 'on: stop');
+  assert.equal(api.motionAllowed({ display: { reduceMotion: 'on' } }, matchMedia(true)), false, 'on: stop even when the OS says nothing');
+  assert.equal(api.motionAllowed({ display: { reduceMotion: 'off' } }, matchMedia(true)), true, 'off: run even against the OS');
+  assert.equal(api.motionAllowed({ display: { reduceMotion: 'off' } }, matchMedia(false)), true, 'off: run');
+  assert.equal(api.motionAllowed({ display: { reduceMotion: 'auto' } }, matchMedia(true)), false, 'auto honours the OS stop');
+  assert.equal(api.motionAllowed({ display: { reduceMotion: 'auto' } }, matchMedia(false)), true, 'auto honours the OS allow');
+  assert.equal(api.motionAllowed({}, matchMedia(true)), false, 'a missing setting behaves like auto');
+
+  /**
+   * Gate 1: not a single media query survives in any CSS this plugin emits.
+   * Two halves, because the surfaces live in different scopes: the
+   * module-scope sheets are exported and concatenated, while the three
+   * per-surface sheets are built inside `apply` and can only be checked as
+   * source text — a media query there is always inside a string literal, so
+   * "no quote followed by `@media (prefers-reduced-motion`" catches it.
+   */
+  const allCss = [api.SIDEBAR_STYLE, api.PAGE_CSS, api.KIT_CSS, api.MOTION_KEYFRAMES].join('\n');
+  assert.equal(
+    allCss.includes('@media (prefers-reduced-motion'),
+    false,
+    'no emitted CSS asks the OS directly: the product setting must be able to override it',
+  );
+  assert.ok(
+    allCss.includes(`html[${api.REDUCE_MOTION_ATTR}] `),
+    'the emitted CSS reads the root attribute instead',
+  );
+  /**
+   * The tab row, the band and the missing-group view build their sheets inside
+   * `apply`, so they are not reachable as exported constants; a media query
+   * there is always inside a string literal, i.e. on a code line. Comments are
+   * allowed to mention the old query (the notes explaining why it went away),
+   * so the assertion is per line: every line that mentions it must be a
+   * comment line.
+   */
+  const offenders = source
+    .split('\n')
+    .filter((line) => line.includes('@media (prefers-reduced-motion'))
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith('*') && !line.startsWith('//') && !line.startsWith('/*'));
+  assert.deepEqual(
+    offenders,
+    [],
+    'no code line anywhere (tab row, band, missing-group view) re-introduces the media query',
+  );
+
+  /**
+   * Gate 2: `motionAllowed` is the only place a mode is turned into a decision.
+   * Same comment allowance as above — the notes explaining the old behaviour
+   * quote the old comparison on purpose.
+   */
+  const handRolled = source
+    .split('\n')
+    .filter((line) => /reduceMotion\s*===\s*'/.test(line))
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith('*') && !line.startsWith('//') && !line.startsWith('/*'));
+  assert.deepEqual(handRolled, [], 'no surface compares the mode by hand any more; they all ask motionAllowed');
+  assert.ok(
+    (source.match(/motionAllowed\(/g) ?? []).length >= 4,
+    'motionAllowed is actually called (plan, root attribute, band, popout)',
+  );
+
+  /** Gate 3: the preview's animate criterion never consults the judgement. */
+  const animateLine = (source.split('\n').find((line) => line.includes('const animate = glyph.motion')) ?? '').trim();
+  assert.ok(animateLine !== '', 'the preview animate criterion is still a one-liner we can find');
+  assert.equal(animateLine.includes('motionAllowed'), false, 'the preview is exempt on purpose — do not wire it in');
+  assert.ok(animateLine.includes('glyph.frequency > 0'), 'the preview still goes quiet at 0%, which is a different switch');
 });
 
 console.log(`PASS — ${groups} groups`);

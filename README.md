@@ -34,9 +34,9 @@ dsh --profile <profile>
 
 `Requires DSH ≥ 0.2.x` — exact compatibility statement pending confirmation.
 
-- Package `dsh-better-notice` (module id is the same string); version `5.3.5`; MIT.
+- Package `dsh-better-notice` (module id is the same string); version `5.3.6`; MIT.
 - Settings live in **account menu → Settings → “Better Notice”**.
-- Verify: `window.__HOTLIST_VERSION__` prints `'5.3.5'`, the left nav has **“Better Notice”**, and sidebar rows start with a status glyph.
+- Verify: `window.__HOTLIST_VERSION__` prints `'5.3.6'`, the left nav has **“Better Notice”**, and sidebar rows start with a status glyph.
 - Published on npm: [dsh-better-notice](https://www.npmjs.com/package/dsh-better-notice). If npm is unreachable, the same tarball is attached to the [latest release](https://github.com/MeruSu/better-notice/releases) — `dsh plugin --profile <profile> add <absolute path>/dsh-better-notice-5.3.2.tgz` does the same job.
 - Installing from a local directory uses `link:` (code edits need no reinstall) and needs an **absolute path with forward slashes** — `dsh plugin` forwards the argument to pnpm inside the profile directory.
 - Uninstall: `dsh plugin --profile <profile> remove dsh-better-notice`.
@@ -152,8 +152,28 @@ On Windows the GUI has a 40 px title strip above everything. The plugin can draw
 - The left edge is measured with a hit test (`elementsFromPoint`): only an element that hugs the left edge *and* is at most 480 px wide counts as occupying space. A full-width container would otherwise push the pills off-screen.
 - The right side reserves a hard-coded `WINDOW_CONTROLS_GUARD = 138` px for the window buttons. It is **not a setting**.
 - `running` never appears here, and the current session is skipped. A session shows on **one** surface only (`error`/`pending`/`completed` on the band, `pinned`/`idle`/`running` in the tab row).
-- **A pill animates for as long as it is on screen.** That is deliberate: a frozen band next to a moving sidebar icon reads as broken. Since 5.3.5 the top bar, the tab row and the sidebar all run the **same** continuous plan — same keyframes, same duration, same seeded phase — so one session looks like one animation no matter which surface shows it. `glyph.frequency` is the shared tempo that moves all three together (0 = stop, 1 = base speed, lower = slower), not a per-surface lottery. `prefers-reduced-motion` (or `display.reduceMotion: 'on'`) stops all three. The band carries its own keyframes, so it animates with the sidebar adapter off.
+- **A pill animates for as long as it is on screen.** That is deliberate: a frozen band next to a moving sidebar icon reads as broken. Since 5.3.6 the top bar, the tab row and the sidebar all run the **same** continuous plan — same keyframes, same single-play duration, same seeded phase — so one session looks like one animation no matter which surface shows it. `glyph.frequency` is the shared **playback frequency** that decides how often a play starts on all three surfaces (0 = never, 1 = back to back, lower = rarer) — it never changes the speed of a play; see [Playback frequency](#playback-frequency). `display.reduceMotion` (`auto` / `on` / `off`) stops the top bar, the tab row, the sidebar and the missing-group reveal, but never the Settings preview. The band carries its own keyframes, so it animates with the sidebar adapter off.
 - macOS: not supported, and it will not be. Nothing to attach to.
+
+### Playback frequency
+
+`categories.<id>.glyph.frequency` is **how often a motion plays**, not how fast it
+plays. One play always lasts the same for a given motion; the slider only decides
+how much silence sits between two plays.
+
+| `frequency` | What you see | `bounce` (one play = 1200 ms) |
+|---|---|---|
+| `1` | plays back to back, no pause | cycle 1200 ms: 1200 ms motion |
+| `0.5` | one play, then an equally long pause | cycle 2400 ms: 1200 ms motion + 1200 ms still |
+| `0.3` | rare — mostly still | cycle 4000 ms: 1200 ms motion + 2800 ms still |
+| `0` | never plays | no animation at all |
+
+One play lasts exactly `MOTION_MS[motion]`: `spin` 2400 ms, `pulse` 1600 ms,
+`bounce` 1200 ms, `blink` 1200 ms. The cycle is `play / frequency`, and the pause
+holds the **last frame** (a full rotation looks the same as the start, so nothing
+"sticks" mid-pose). The same number drives the top bar, the tab row and the sidebar
+at once. Because the keyframes are generated per duty step, the `1` step is exactly
+the same motion as before 5.3.6 — only the gaps are new.
 
 ### Label display modes (how a pill / seat draws its name)
 
@@ -313,7 +333,7 @@ Category ids: `pinned` · `error` · `pending` · `completed` · `running` · `i
 | Use your own square image | `categories.<id>.glyph.uploads` | up to 6, ≤16 KB each, `png/jpeg/webp/gif` | `[]` |
 | Change the motion | `categories.<id>.glyph.motion` | `none` / `spin` / `pulse` / `bounce` / `blink` | see [reference](#per-category-fields) |
 | Animate the title too | `categories.<id>.glyph.motionTarget` | `'glyph'` (icon only) / `'row'` (icon + title) | `'row'` since 4.6.0 |
-| Make it slower or stop it | `categories.<id>.glyph.frequency` | `0`–`1`, step `0.05` (`0` = stop) — the shared tempo: top bar, tab row and sidebar all change together | `1` |
+| Make it rarer or stop it | `categories.<id>.glyph.frequency` | `0`–`1`, step `0.05` (`0` = never) — the shared playback frequency: one play always lasts the same, only the gap between plays changes; top bar, tab row and sidebar all change together | `1` |
 | Pop an image when this category appears | `categories.<id>.popout.enabled` | `true` / `false` | `error` / `pending` / `completed` = `true` |
 | Built-in artwork or your own | `categories.<id>.popout.builtin` / `.images` | `true` / `[]`; ≤6 images, ≤64 KB each | `true` / `[]` |
 | How long the popout stays | `categories.<id>.popout.displayMs` | `2000`–`20000`, rounded to 500 | `7000` |
@@ -453,7 +473,7 @@ Field-name-level documentation for people writing scripts.
 | `overlay.side` | `'auto'` | `auto` / `left` / `right` |
 | `overlay.sizeMin` / `sizeMax` | `260` / `520` | 120–900 px (no settings row since 4.5; midpoint, narrowed to the viewport) |
 | `pinned.maxSeats` | `3` | `0`–`12`, `0` = hide pinned; only limits *how many* — pinning itself comes from the host |
-| `display.reduceMotion` | `'auto'` | `auto` / `on` / `off`; `on` freezes all motion |
+| `display.reduceMotion` | `'auto'` | `auto` / `on` / `off`. `auto` follows the OS. It stops motion on the four real surfaces — sidebar, tab row, top bar, missing-group reveal — and **never** the Settings preview, which keeps playing so you can see what you picked |
 | `shortcuts.jumpEnabled` / `overlayEnabled` / `overlayKey` | `true` / `false` / `'Alt+Shift+S'` | no settings rows since 4.4; keys keep working |
 
 ### Per-category fields
@@ -468,8 +488,8 @@ Field-name-level documentation for people writing scripts.
 | `glyph.value` | per category | emoji, at most 8 code points |
 | `glyph.uploads` | `[]` | up to 6, ≤16 KB each, `png/jpeg/webp/gif` (**no SVG**) |
 | `glyph.motion` | `pinned/error/pending/completed/running/idle` → `bounce` / `bounce` / `bounce` / `spin` / `spin` / `none` | `none` / `spin` / `pulse` / `bounce` / `blink` |
-| `glyph.motionTarget` | `'row'` | `glyph` = icon only, `row` = icon + title |
-| `glyph.frequency` | `pinned/error/pending/completed/running/idle` → `0.3` / `0.9` / `0.9` / `1` / `1` / `0` | 0–1 step 0.05; shared tempo — the top bar, the tab row and the sidebar all run at `duration = base / max(frequency, 0.05)`; `0` = stop, `1` = base speed |
+| `glyph.motionTarget` | `'row'` | `glyph` = icon only, `row` = icon + title (the tab row writes its own label span, never wrapping or cloning it) |
+| `glyph.frequency` | `pinned/error/pending/completed/running/idle` → `0.3` / `0.9` / `0.9` / `1` / `1` / `0` | 0–1 step 0.05; **playback frequency**, not speed — one play is always `MOTION_MS[motion]`, the cycle is `play / frequency` and the rest holds the last frame; `0` = never, `1` = back to back |
 | `popout.enabled` | `true` for `error` / `pending` / `completed` | pop an image when the session enters the category |
 | `popout.builtin` / `.images` | `true` / `[]` | built-in art, or random pick from the pool (≤6, ≤64 KB) |
 | `popout.displayMs` | `7000` | 2000–20000, 500 ms steps |
@@ -504,7 +524,7 @@ Read this part before touching anything. The user says one sentence; map it to a
 | The user says | What it actually is | Change | Suggested value |
 |---|---|---|---|
 | “It's too noisy” | Usually motion or popouts — three categories do play a cue by default | sound: `sound.enabled` / `sound.volume`; motion: `glyph.frequency`; popout: `popout.enabled` | `sound.volume: 20`–`30`; `glyph.frequency: 0.1`–`0.3`; or turn the three `popout.enabled` off |
-| “The blinking is annoying” | Motion, not sound | `glyph.frequency` down or `0`; global switch `display.reduceMotion = 'on'` | `frequency: 0` freezes that category on all three surfaces |
+| “The blinking is annoying” | Motion, not sound | `glyph.frequency` down or `0`; global switch `display.reduceMotion = 'on'` (or `'off'` to force motion back on) | `frequency: 0` means that category never plays, on all three surfaces |
 | “Too cluttered” | Reduce quantity first, then surfaces | `maxSeats`; then `positions.sidebar = false` | `maxSeats: 3`–`4` |
 | “Only tell me when I have to act” | Keep `error` + `pending` only | turn `surfaces` off for `completed`/`running`/`idle` | `{tab:false,sidebar:false,topbar:false}` on those three |
 | “Make it more obvious” | Add popout/sound/motion | `popout.enabled`, `sound.enabled`, `frequency` up | `popout.displayMs: 12000`, `frequency: 1`, `overlay.sizeMin/sizeMax` up |
@@ -632,7 +652,7 @@ s.lastError()      // last storage write error (string or null)
 
 // settings + the three asset pools
 const api = window.__HOTLIST__;
-api.version                                        // '5.3.5'
+api.version                                        // '5.3.6'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }
@@ -672,7 +692,7 @@ More examples (bulk import, loading assets from URLs, the three preview paths) i
 7. **The window top bar needs the Windows desktop shell.** In a browser it only appears with `topbar.previewInWeb`; on macOS it is not supported at all. While it is mounted the tab row keeps working — they are independent surfaces.
 8. **Tab and sidebar do not share one classifier.** `classify()` (tab) and `sidebarStateOf()` (sidebar) read the same data; since 4.6.0 their priorities agree (`error > pending > completed > running > pinned > idle`) but they are still different functions: the sidebar also honours the host's `completionUnread`, the tab surface only trusts this plugin's own `completedAt`, and sidebar errors carry their own 30 min TTL (`SIDEBAR_ERROR_TTL_MS`) instead of the 10 min the tab surface uses (`ERROR_TTL_MS`). So a session that finishes and immediately restarts can briefly show “tab ✅, sidebar ⏳”. This is a deliberate trade-off between the two surfaces, not a bug to fix.
 9. **The tab row can run out of room.** The host folds extra tabs into an unreachable overflow menu, so this plugin computes its own limit from the row width.
-10. **All three surfaces run one shared motion plan (since 5.3.5).** The top bar, the tab row and the sidebar glyph all derive from `motionPlanOf(settings, sessionId, category, motion, motionTarget)`: the same keyframes, the same duration (`base / max(frequency, 0.05)`) and the same seeded phase (`fnv1a(sessionId|category)`). `frequency` is a tempo that moves all three together, not a per-surface lottery — there are no bursts anymore.
+10. **All three surfaces run one shared motion plan (since 5.3.6).** The top bar, the tab row and the sidebar glyph all derive from `motionPlanOf(settings, sessionId, category, motion, motionTarget)`: the same generated keyframes (`hl-<motion>-<step>`), the same single-play duration (`MOTION_MS[motion]`) and the same seeded phase (`fnv1a(sessionId|category)`). `frequency` is the shared **playback frequency** — the cycle is `play / frequency`, the rest of the cycle holds the last frame — so it changes how often a play starts, never how fast it is; there are no bursts anymore.
 11. **Sounds have a 1.5 s global throttle.** A cue arriving less than 1500 ms after the previous one is dropped; the first round after a cold start only records. This is verified by source and unit test (group `sound player dedupe`) — on a real machine it is hard to produce two genuine transitions that fast.
 12. **Settings are bound to the page origin.** `localStorage` belongs to the origin, so a different GUI port means a different origin.
 13. **The super reminder is Windows-only and covers the primary display.** The script is PowerShell + WPF, and the page can only *ask* the host to run it: on other platforms the switch saves your choice and nothing rises. It also covers the primary screen only, so a second monitor does not flash.
@@ -750,7 +770,7 @@ The same ground as the pitfall list at the bottom of this file, in checklist for
 ```powershell
 node --check client.js          # syntax. client.js lives inside a module loader, so a syntax error only explodes when the real page boots
 node --check index.js
-node test/classify.test.mjs     # expect a final line: PASS — 126 groups
+node test/classify.test.mjs     # expect a final line: PASS — 132 groups
 ```
 
 The unit tests read the real `client.js` source, wrap it in a stub `window.__ModuleLoader__` and run it: the fake browser is hand-written (`window` / `document`, no jsdom, `React` is a stub too), the code under test is the real source. They also include a few static scans: undeclared constants, CSS selector legality, and “shortcut labels must be thunks”.
@@ -769,7 +789,7 @@ index.js               host side: registers the /hotlist-sound, /hotlist-ring an
 cordis.patch.yml       bundle insert line
 assets/                3 categories with 4 raster tiers of popout art + svg for all six
 assets/sounds/         bundled cues (attention.wav / complete.wav)
-test/classify.test.mjs unit tests (126 groups)
+test/classify.test.mjs unit tests (132 groups)
 docs/                  architecture, testing, extending
 tools/attn-ring/       super-reminder script (PowerShell + WPF; ships in the package)
 tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell; ships in the package)

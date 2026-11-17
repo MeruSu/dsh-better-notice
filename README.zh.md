@@ -34,9 +34,9 @@ dsh --profile <profile>
 
 `Requires DSH ≥ 0.2.x` —— 确切写法待确认。
 
-- 包名 `dsh-better-notice`（模块 id 与包名相同）；版本 `5.3.5`；MIT。
+- 包名 `dsh-better-notice`（模块 id 与包名相同）；版本 `5.3.6`；MIT。
 - 设置位置：**账号菜单 →「设置」→ 左导航「热表」**。
-- 装完确认：控制台打 `window.__HOTLIST_VERSION__` 出 `'5.3.5'`、左导航有「热表」、会话栏每行行首多一枚状态图标。
+- 装完确认：控制台打 `window.__HOTLIST_VERSION__` 出 `'5.3.6'`、左导航有「热表」、会话栏每行行首多一枚状态图标。
 - npm 上有：`dsh-better-notice`。如果 npm 连不上，[最新 release](https://github.com/MeruSu/better-notice/releases) 附了同一个 tarball——`dsh plugin --profile <profile> add <绝对路径>/dsh-better-notice-5.3.2.tgz` 效果一样。
 - 从本地目录装用 `link:`（改代码不用重装），路径要**绝对路径 + 正斜杠**——`dsh plugin` 会把参数转发给 profile 目录里的 pnpm。
 - 卸载：`dsh plugin --profile <profile> remove dsh-better-notice`。
@@ -152,8 +152,21 @@ Windows 上的 GUI 顶部有一条 40px 标题带。插件可以往里面画一�
 - 左边界用命中测试（`elementsFromPoint`）量：只有**贴左边且宽度 ≤480** 的元素才算占位——全宽容器要是算占位，胶囊会被推到屏幕外。
 - 右侧给窗控写死 `WINDOW_CONTROLS_GUARD = 138` px，**不是设置项**。
 - `running` 永远不出现在这里，当前会话也跳过。一个会话只出现在**一个**面上（`error`/`pending`/`completed` 走顶栏，`pinned`/`idle`/`running` 走 tab 行）。
-- **胶囊只要还挂在屏幕上就一直在动。** 这是故意的：顶栏静止、旁边侧栏图标在动，看着就像坏了。5.3.5 起顶栏、tab 行、侧栏跑的是**同一份**常驻动效——同一套 keyframes、同一时长、同一相位种子，一个会话在哪个表面上看起来都像同一个动画；`glyph.frequency` 是三者共用的节奏倍率（0 = 停、1 = 原速、越低越慢），不再是谁先掷中谁动的抽签。`prefers-reduced-motion`（或 `display.reduceMotion: 'on'`）三处一起停。keyframes 跟着顶栏自己的样式表走，所以侧栏适配器关着时它也照动。
+- **胶囊只要还挂在屏幕上就一直在动。** 这是故意的：顶栏静止、旁边侧栏图标在动，看着就像坏了。5.3.6 起顶栏、tab 行、侧栏跑的是**同一份**常驻动效——同一套 keyframes、同一次播放时长、同一相位种子，一个会话在哪个表面上看起来都像同一个动画；`glyph.frequency` 是三者共用的**播放频率**，决定「多久播一次」（0 = 不播、1 = 连着播、越小越稀），它**不改变每一下的快慢**，详见 [播放频率](#播放频率)。`display.reduceMotion`（`auto` / `on` / `off`）会停掉顶栏、tab 行、侧栏与「缺失分组」揭示，但**永不停设置页预览**。keyframes 跟着顶栏自己的样式表走，所以侧栏适配器关着时它也照动。
 - macOS：不支持，以后也不会。
+
+### 播放频率
+
+`categories.<id>.glyph.frequency` 管的是**多久播一次**，不是**每一下多快**。同一个动作，一次播放的时长永远一样，滑块只决定两次之间歇多久。
+
+| `frequency` | 你看到 | `bounce`（一次播放 1200ms） |
+|---|---|---|
+| `1` | 连着播，不停 | 周期 1200ms：动 1200ms |
+| `0.5` | 播一下、歇同样长 | 周期 2400ms：动 1200ms + 停 1200ms |
+| `0.3` | 很稀，大部分时间静止 | 周期 4000ms：动 1200ms + 停 2800ms |
+| `0` | 完全不播 | 没有动画 |
+
+一次播放恒为 `MOTION_MS[动作]`：`spin` 2400ms、`pulse` 1600ms、`bounce` 1200ms、`blink` 1200ms。周期 = `播放 / 频率`，停的那一段**停在末帧**（转满一圈和起点看着一样，所以不会卡在半个姿势上）。同一个数同时驱动顶栏、tab 行、侧栏。因为 keyframes 是按占空档生成的，`1` 那一档就是 5.3.6 之前的样子——只是多了「间隔」。
 
 ### 标签显示三档（胶囊 / 座位怎么画名字）
 
@@ -272,7 +285,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | 用自己画的方图 | `categories.<id>.glyph.uploads` | 最多 6 张，单张 ≤16KB，`png/jpeg/webp/gif` | `[]` |
 | 换动效 | `categories.<id>.glyph.motion` | `none` / `spin` / `pulse` / `bounce` / `blink` | 见[字段表](#每类字段) |
 | 让标题跟着一起动 | `categories.<id>.glyph.motionTarget` | `'glyph'`（只动图标）/ `'row'`（图标+标题） | 4.6.0 起 `'row'` |
-| 让它变慢或停下 | `categories.<id>.glyph.frequency` | `0`–`1`，步进 `0.05`（`0` = 停）——三者共用的节奏倍率，顶栏、tab 行、侧栏一起变 | `1` |
+| 让它变稀或停下 | `categories.<id>.glyph.frequency` | `0`–`1`，步进 `0.05`（`0` = 不播）——三者共用的**播放频率**：每一下时长恒定，变的只是两下之间的间隔；顶栏、tab 行、侧栏一起变 | `1` |
 | 这一类进入时弹不弹图 | `categories.<id>.popout.enabled` | `true` / `false` | `error` / `pending` / `completed` 为 `true` |
 | 用内置图还是自己的 | `categories.<id>.popout.builtin` / `.images` | `true` / `[]`；≤6 张、单张 ≤64KB | `true` / `[]` |
 | 弹图停留多久 | `categories.<id>.popout.displayMs` | `2000`–`20000`，按 500 取整 | `7000` |
@@ -392,7 +405,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | `overlay.side` | `'auto'` | `auto` / `left` / `right` |
 | `overlay.sizeMin` / `sizeMax` | `260` / `520` | 120–900px（4.5 起无设置行，取中值再按视口收窄） |
 | `pinned.maxSeats` | `3` | `0`–`12`，`0` = 不显示置顶；只管「显示几个」，置顶本身来自宿主 |
-| `display.reduceMotion` | `'auto'` | `auto` / `on` / `off`；`on` 冻结全部动效 |
+| `display.reduceMotion` | `'auto'` | `auto` / `on` / `off`。`auto` 跟随系统；它停的是**四个真实表面**——侧栏、tab 行、顶栏、「缺失分组」揭示——**永不停设置页预览**（预览是你唯一能看见所选动作的地方） |
 | `shortcuts.jumpEnabled` / `overlayEnabled` / `overlayKey` | `true` / `false` / `'Alt+Shift+S'` | 4.4 起无设置行，键照样工作 |
 
 ### 每类字段
@@ -407,8 +420,8 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | `glyph.value` | 见上表 | emoji，最多 8 个码位 |
 | `glyph.uploads` | `[]` | 最多 6 张，单张 ≤16KB，`png/jpeg/webp/gif`（**拒 svg**） |
 | `glyph.motion` | 置顶/报错/待处理 `bounce`、已完成/进行中 `spin`、闲置 `none` | `none` / `spin` / `pulse` / `bounce` / `blink` |
-| `glyph.motionTarget` | `'row'` | `glyph` = 只动图标，`row` = 图标 + 标题 |
-| `glyph.frequency` | 置顶 `0.3`、报错 `0.9`、待处理 `0.9`、已完成 `1`、进行中 `1`、闲置 `0` | 0–1 步进 0.05；三处共用节奏——`duration = 基准 / max(频率, 0.05)`；`0` = 停，`1` = 原速 |
+| `glyph.motionTarget` | `'row'` | `glyph` = 只动图标，`row` = 图标 + 标题（tab 行是给宿主自己的 label span 打标记，绝不包 wrapper、不 clone） |
+| `glyph.frequency` | 置顶 `0.3`、报错 `0.9`、待处理 `0.9`、已完成 `1`、进行中 `1`、闲置 `0` | 0–1 步进 0.05；**播放频率，不是速度**——一次播放恒为 `MOTION_MS[动作]`，周期 = `播放 / 频率`，其余时间停在末帧；`0` = 不播，`1` = 连着播 |
 | `popout.enabled` | `error` / `pending` / `completed` 为 `true` | 该类别进入时是否弹图 |
 | `popout.builtin` / `.images` | `true` / `[]` | 内置素材，或从上传池随机取（≤6、≤64KB） |
 | `popout.displayMs` | `7000` | 2000–20000，500ms 取整 |
@@ -443,7 +456,7 @@ x-hotlist-ring: 1        # 必须带，不带就拒
 | 用户说 | 其实是 | 改哪里 | 大概什么值 |
 |---|---|---|---|
 | 「太吵了」 | 多半是动效或弹出图——三类提示音默认是开的 | 音效 `sound.enabled` / `sound.volume`；动效 `glyph.frequency`；弹出 `popout.enabled` | `sound.volume: 20`–`30`；`frequency: 0.1`–`0.3`；或把三类的 `popout.enabled` 关掉 |
-| 「一闪一闪很烦」 | 动效，不是音效 | `glyph.frequency` 调低或 `0`；全局 `display.reduceMotion = 'on'` | `frequency: 0` 之后该类的三处表面一起停 |
+| 「一闪一闪很烦」 | 动效，不是音效 | `glyph.frequency` 调低或 `0`；全局 `display.reduceMotion = 'on'`（想强制动起来就 `'off'`） | `frequency: 0` 之后该类在三个表面上一律不播 |
 | 「太乱了」 | 先减数量，再减面 | `maxSeats`；再 `positions.sidebar = false` | `maxSeats: 3`–`4` |
 | 「只提醒我需要动手的」 | 只留 `error` + `pending` | 把 `completed`/`running`/`idle` 的 `surfaces` 全关 | `{tab:false,sidebar:false,topbar:false}` |
 | 「想更显眼」 | 加弹出、加声音、加动效 | `popout.enabled`、`sound.enabled`、`frequency` 调高 | `popout.displayMs: 12000`，`frequency: 1`，`overlay.sizeMin/sizeMax` 调高 |
@@ -571,7 +584,7 @@ s.lastError()      // 最近一次写盘错误（字符串或 null）
 
 // 设置 + 三个素材池
 const api = window.__HOTLIST__;
-api.version                                        // '5.3.5'
+api.version                                        // '5.3.6'
 api.settings.get() / .set(patch) / .reset() / .subscribe(fn)
 api.settings.backups()                             // → [{ at, version }]
 api.settings.restore(index)                        // → { ok, at? }
@@ -611,7 +624,7 @@ api.export({ format: 'md' })                       // 导出会话清单，md | 
 7. **窗口顶栏需要 Windows 桌面外壳。** 浏览器里只有开了 `topbar.previewInWeb` 才出现；macOS 完全不支持。挂着顶栏时 tab 行照常工作，两个面互相独立。
 8. **tab 与侧栏的判定函数不是同一个。** `classify()`（tab）与 `sidebarStateOf()`（侧栏）读同一批数据，4.6.0 起两边优先级已统一，但仍不是同一个函数：侧栏还认宿主的 `completionUnread`，tab 面只认本插件记下的 `completedAt`，侧栏的报错另有自己的 30 分钟 TTL（`SIDEBAR_ERROR_TTL_MS`），而 tab 面用的是 10 分钟（`ERROR_TTL_MS`）。所以「刚跑完又立刻重新开始跑」的会话会短暂出现「tab 还是 ✅、侧栏已经 ⏳」。这是两面的取舍，不是待修的 bug。
 9. **tab 行放不下会被裁。** 官方把多余 tab 折进一个点不到的溢出菜单，所以本插件自己按行宽算上限。
-10. **三处表面跑同一份动效计划（5.3.5 起）。** 顶栏、tab 行、侧栏字形都从 `motionPlanOf(settings, sessionId, category, motion, motionTarget)` 派生：同一套 keyframes、同一时长（`基准 / max(频率, 0.05)`）、同一相位种子（`fnv1a(sessionId|category)`）。`frequency` 是三处一起动的节奏倍率，不再是每处各掷一次的抽签——脉冲（burst）机制已整个删除。
+10. **三处表面跑同一份动效计划（5.3.6 起）。** 顶栏、tab 行、侧栏字形都从 `motionPlanOf(settings, sessionId, category, motion, motionTarget)` 派生：同一套生成的 keyframes（`hl-<动作>-<档>`）、同一次播放时长（`MOTION_MS[动作]`）、同一相位种子（`fnv1a(sessionId|category)`）。`frequency` 是三者共用的**播放频率**——周期 = `播放 / 频率`，其余时间停在末帧——所以它只改「多久播一次」，不改「每一下多快」；脉冲（burst）机制已整个删除。
 11. **音效有 1.5 秒全局节流。** 两次播放间隔不足 1500ms 时后来的那条直接丢弃；冷启动首轮只记不播。这条只有源码与单测口径（组 `sound player dedupe`）——真机上很难构造连续两次真实状态转换。
 12. **设置与页面端口绑定。** `localStorage` 挂在 origin 上，GUI 端口变了就是另一个 origin。
 13. **超级提醒只在 Windows 上能用，而且只盖主屏。** 脚本是 PowerShell + WPF，页面只能*请求*宿主去跑它：别的平台上开关会存下你的选择，但什么都不会升起来。它也只在主显示器上出现，副屏不会闪。
@@ -689,7 +702,7 @@ tab 座位（conversation.view）  侧栏 DOM 增强      设置页（settings.s
 ```powershell
 node --check client.js          # 语法。client.js 包在模块加载器里，语法错只在真机 boot 时炸
 node --check index.js
-node test/classify.test.mjs     # 期望最后一行：PASS — 126 groups
+node test/classify.test.mjs     # 期望最后一行：PASS — 132 groups
 ```
 
 单测把真实的 `client.js` 源文件读进来，塞进 `window.__ModuleLoader__` 的桩里执行：假的是浏览器（手写的极简 `window` / `document`，不引 jsdom，`React` 也是桩），跑的是真源码。里面还带几道静态扫描：引用未声明的常量、注入样式选择器合法性、快捷键 label 必须是 thunk。
@@ -708,7 +721,7 @@ index.js               宿主侧：注册 /hotlist-sound、/hotlist-ring、/hotl
 cordis.patch.yml       bundle 插入行
 assets/                3 类各 4 档弹出图素材 + 六类各一份 svg
 assets/sounds/         内置音效（attention.wav / complete.wav）
-test/classify.test.mjs 单测（126 组）
+test/classify.test.mjs 单测（132 组）
 docs/                  架构、测试、扩展三份维护者文档
 tools/attn-ring/       超级提醒脚本（PowerShell + WPF；随包发布）
 tools/audio-endpoint/  默认输出探测（Windows Core Audio，走 PowerShell；随包发布）

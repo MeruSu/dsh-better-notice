@@ -3,7 +3,7 @@
 This file is for AI coding agents. It says what this plugin already does, so you
 do not rebuild it, and what will break the host if you get it wrong.
 
-- Package: `dsh-better-notice` · version `5.3.5` · MIT
+- Package: `dsh-better-notice` · version `5.3.6` · MIT
 - Host: DeepSeek Harness (DSH) Web UI
 - One command to install: `dsh plugin --profile <profile> add dsh-better-notice`
 - One-page summary for scrapers: [llms.txt](llms.txt) · human docs: [README.md](README.md)
@@ -130,7 +130,7 @@ authenticated** — publish public assets only, never user data.
 
 ```js
 window.__HOTLIST__ = {
-  version,                                              // "5.3.5"
+  version,                                              // "5.3.6"
   settings: { get, set, reset, subscribe, backups, restore },
   assets:   { add, list, clear, preview },
   audio,                                                // read-only headphone-gate probe
@@ -197,7 +197,7 @@ assets/                error|pending|completed × 4 **static** webp tiers (681 K
 assets/sounds/         attention.wav, complete.wav (+ their manifest)
 docs/ARCHITECTURE.md   layering, state model, settings schema, line-number index
 docs/EXTENDING.md      API surface + how to extend without breaking data
-docs/TESTING.md        the 126 test groups, each with its source line
+docs/TESTING.md        the 132 test groups, each with its source line
 test/classify.test.mjs the whole self-test (pure node, no browser)
 tools/attn-ring/       super-reminder script + media/{smack,wave}.gif + build-media.py — SHIPS in the package
 tools/audio-endpoint/  default-output probe (Windows Core Audio via PowerShell) — SHIPS in the package
@@ -210,7 +210,7 @@ tools/meru-tts/        optional TTS helper; repo only, NOT in the package (~1.6 
 node --check client.js
 node --check index.js
 node --check test/classify.test.mjs
-node test/classify.test.mjs      # expect: PASS — 126 groups
+node test/classify.test.mjs      # expect: PASS — 132 groups
 ```
 
 `node --check` alone is not enough: a deleted-but-still-referenced constant is
@@ -253,8 +253,12 @@ Git may not be under `C:\Program Files\Git`. Ask the tool itself:
 
 ## 6. Known limits — do not file these as bugs
 
-1. Text animation only works on the left sidebar. Tab-seat labels are rendered by
-   the host; their CSS cannot be animated from here.
+1. Text animation reaches the left sidebar **and, since 5.3.6, the tab row's own
+   title**: the host renders `<span class="…tabLabel">`, and this plugin puts
+   `data-hotlist-tab-label` on that element and animates it. It still **never**
+   wraps, clones or restyles that span (5.3.4 was reverted for wrapping), so a host
+   that renders the title as a bare text node directly under the button falls back
+   to animating the glyph only — that fallback is by design, not a bug.
 2. The window top bar is **Windows-only and needs the desktop shell** (it lives in
    the 40 px strip that `html[data-windows-titlebar]` marks). In a browser the band
    stays down unless `topbar.previewInWeb` is on. macOS is not supported and will
@@ -288,6 +292,37 @@ Git may not be under `C:\Program Files\Git`. Ask the tool itself:
    still draw the amber ring, and a missing or undecodable clip falls back to it.
 9. `hideNativeDot`, `shortcuts.*` and `overlay.size` still exist as fields but
    have no settings-page row. Their behaviour is unchanged; only the UI is gone.
+10. **`display.reduceMotion` covers four real surfaces and never the Settings
+   preview.** `auto` follows the OS, `on` stops motion, `off` forces it — one
+   judge, `motionAllowed(settings, win)`, which writes
+   `html[data-hotlist-reduce-motion]` and lets CSS read that root attribute.
+   The four surfaces are the sidebar, the tab row, the top bar and the missing-group
+   reveal. The Settings page preview is deliberately exempt: it is the only place a
+   user can see what the chosen motion looks like, so freezing it would mean picking
+   blind. Do not "unify" the preview into `motionAllowed` — the exemption is
+   documented in the function's own comment.
+
+## 6b. Motion semantics — decided, do not re-litigate
+
+1. **`glyph.frequency` is how often a motion plays, never how fast it plays.** One
+   play always lasts `MOTION_MS[motion]` (spin 2400 / pulse 1600 / bounce 1200 /
+   blink 1200 ms); the cycle is `play / frequency`, and the rest of the cycle holds
+   the last frame. `1` = back to back, `0` = never. 5.3.5 briefly divided the
+   duration by the frequency, which made "rarer" look like "slower", and the user
+   rejected it in those words: 「动作频率又变成了动作速度？？？为什么老是改老代码还改错？？」.
+2. **Keyframes are generated per duty step, and the `f = 1` step is byte-equal in
+   every stop to the hand-written 5.3.5 table.** `motionKeyframeRules()` emits
+   8 motions × 20 steps into one `<style data-hotlist-style="motion">` block;
+   `SIDEBAR_STYLE` / `TAB_CSS` / `CHIP_CSS` keep only timing + iteration and let JS
+   write `animation-name`. The `f=1 keyframes are the published 5.3.5 table` test
+   pins the old table as a baseline — if it goes red you changed how it looks, not
+   how often it plays.
+3. **Tab-row `motionTarget: 'row'` animates the host's own label span.** It sets
+   `data-hotlist-tab-label` on the existing `<span class="…tabLabel">`; it never
+   wraps, clones or changes that element's `display`. Wrapping is what got 5.3.4
+   reverted, and moving the glyph out of the span changes the host's tab height by
+   3 px (measured). Hosts that render the title as a bare text node under the button
+   have no label element to mark, so they fall back to animating the glyph alone.
 
 ## 7. Bundled artwork is a placeholder, and that is on purpose
 

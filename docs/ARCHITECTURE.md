@@ -2,9 +2,9 @@
 
 目标读者：下一个要改这份代码的人。看完应该能回答三件事——状态从哪来、三种显示位置各自怎么挂、哪些地方看起来"脏"但**换干净写法会更糟**。
 
-所有行号对 `client.js`（**8094 行，v5.3.5**）。**行号是起点不是真理**：文件一改就漂，按符号名搜（`grep -n 'function classify' client.js`）才准。
+所有行号对 `client.js`（**8391 行，v5.3.6**）。**行号是起点不是真理**：文件一改就漂，按符号名搜（`grep -n 'function classify' client.js`）才准。
 
-这批 `client.js:N` 在 **v5.3.2 又整体重钉过一次**，做法是拿**上一版快照**（`git show HEAD:client.js`，7914 行）当基准：对每个旧行号先找出它落在旧文件的哪个定义符号里，再定位新文件（8142 行）里同名符号的定义行，最后按原偏移平移（区间保持原长度，符号消失就报出来不猜）。所以每条引用都仍然落在**同一个符号内部**，只是绝对行号变了。`test:N` 的 **126 条**同样按测试名从源码行号重新对齐（`docs/TESTING.md` §1.2 的行号就是真值）。
+这批 `client.js:N` 在 **v5.3.2 又整体重钉过一次**，做法是拿**上一版快照**（`git show HEAD:client.js`，7914 行）当基准：对每个旧行号先找出它落在旧文件的哪个定义符号里，再定位新文件（8142 行）里同名符号的定义行，最后按原偏移平移（区间保持原长度，符号消失就报出来不猜）。所以每条引用都仍然落在**同一个符号内部**，只是绝对行号变了。`test:N` 的 **132 条**同样按测试名从源码行号重新对齐（`docs/TESTING.md` §1.2 的行号就是真值）。
 
 **v5.3.5 又动过一次，这次只重钉了一半**：burst（抽签）机制整体删除，`client.js` 从 8,163 行缩到 8,094 行，行号整体前移。本版新增的 **§23** 用的是 5.3.5 的现查真值；**§1–§22 里的 `client.js:N` 仍是 5.3.4 快照的行号**（大致前移 60–90 行，符号名没变，按 `grep -n '<符号名>'` 现查即可）。下一次统一重钉时一并处理——这也是为什么每条引用都写了符号名，而不是只写数字。
 
@@ -124,7 +124,7 @@ api-session/error│ sidebarStateOf          client.js:3572 │
 - 只插入一个 `span[data-hotlist-glyph]` 到**标题 span 之前**（`findRowTitle`，`client.js:3552`：`_title` 类名 → 文本等于 `displayTitle` → 非时间文本 → 第二个 span；找不到就只动图标并 debug 一行，绝不抛）。
 - 我们自己的节点**绝不带 `data-state`**，也不放文本节点（emoji 用 `::before{content:attr(data-hotlist-char)}`，方图用 `<img alt="">`），避免被宿主的选择器或无障碍树误认。
 - `motionTarget:'row'` 时对**宿主标题**写 inline `animation`（同 keyframes、同相位），停用/换状态/卸载时还原原值（`applyMotion`，`client.js:3831`）。文字动效只许 `opacity`/`translate`，禁 `scale`（字会糊）。
-- **tab 座位不吃 `motionTarget`**：宿主 tab 的 label 是一段被宿主渲染并复用的字符串，包住它会打乱宿主布局，也会让图标停在 `none`（5.3.2 的回归，5.3.4 回退）。规矩是「这个 tab 属于哪个类别，它的 emoji 就有那个类别的动效」，`decorateTabSeat` 里 `moveTitle` 恒为假（`client.js:6712-6772`），`[data-hotlist-tab-title]` 只在清理时出现。
+- **tab 座位在 5.3.6 起吃 `motionTarget`，但做法是「标宿主自己的 label span」**：宿主把标题渲染成 `<span class="…tabLabel">` 里的一段文本，`paintTabLabel()` 给这个 span 打 `data-hotlist-tab-label` 并内联写文字动画，`rowTarget` 为真时 glyph 的 `data-hotlist-motion` 记 `none`。**绝不包 wrapper、不 clone、不改它的 `display`**（5.3.2 的回归、5.3.4 的回退都出在包 wrapper 上；把 glyph 搬出 span 会让 tab 高度 +3 px，实测过）。宿主若把标题渲染成 button 下的裸文本节点，没有 label 元素可标 → 退回只动 glyph。
 - `MAX_MISSES=60`（`client.js:3338`）：连续找不到行/标题就整块停用（删自己的节点与样式），30 秒后再试，避免在 DOM 大改后继续乱贴。
 - **tab label 是字符串管线**：`dsh-client-ui-conversation:20767-20776` 用 `{label}` 画文本，所以 tab 上只有 emoji，不能放图片（图片只能进我们自己的 React 树：设置页预览、未来的顶栏/浮层）。
 
@@ -255,9 +255,9 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 - 每个类别有自己的 `glyph.frequency`（0–1、步进 0.05、默认按类：置顶 0.3 / 报错 0.9 / 待处理 0.9 / 已完成 1 / 进行中 1 / 闲置 0；1 = 每个节拍都播、0 = 该类永不动）。侧栏适配器仍是 1s ticker，但不再按时间记账：**每个类别每 tick 掷一次**骰子 —— `roll = Math.random()`，`roll >= frequency` 就跳过，命中后用同一个 `roll` 从该类里挑**一个**座位播一遍单程动画（`MOTION_MS{spin:2400,pulse:1600,bounce:1200,blink:1200}`，`client.js:3342`）。所以单测能精确断言「每类每 tick 恰好一次随机调用」；`frequency` 为 0 的类连骰子都不掷。
 - 并发上限 `MOTION_CONCURRENCY=4`（`client.js:336`）：四个座位正在动时，后来的类跳过（它已经掷过骰子，只是不再 `startBurst`）。
 - `reduceMotion: 'on'` 一次全停且不再掷；`display:hidden` 时 ticker 只切暂停属性；卸载/`stop()` 清掉所有 burst 定时器。
-- 动画本身仍是纯 CSS（`hl-spin` 等 + 单程变体 `hl-spin 2.4s linear 1`）。`row` 目标用 `hl-text-*`：只改 `opacity` 与 1–2px 的 `translate`，**不加 `scale`**（文字放大会发虚）。v4.3 之前这里只动 `opacity`，真机上看起来「标题根本没动」，v4.4 加了小位移才看得出；这也是 `motionTarget` 设为 `row` 时一直保留这个选项、没有被藏进 API 的原因。
-- 键名 `data-hotlist-burst` 标记"这一轮正在动"，验收脚本与单测都靠它数并发；标题上的 `data-hotlist-text-motion` 标记文字动效。
-- **预览**是同一套频率的可视化：`previewStyle()`（`client.js:4103`）在 `previewKeyframes()`（`client.js:4086`）生成的 20 档 `@keyframes hl-pv-<motion>-<step>` 之间选一档（`PREVIEW_STEPS=20`，`client.js:4077`）——`step = round(frequency * 20)`，动画时长按 `20 / step` 拉长，于是「动作时间 ÷ 周期」正好等于频率；`frequency = 0` 时 `glyphNode` 直接不给 animation（`previewStyle` 自身会把 0 夹到 1 档，无法表示"不播"）。它用 `linear infinite` 常驻循环，所以设置页一打开就能看到频率的实际感觉，滚出视口/卸载即随节点消失。
+- 动画本身仍是纯 CSS（共享表里的 `hl-<motion>-<step>`；`row` 目标用 `hl-text-*`）：只改 `opacity` 与 1–2px 的 `translate`，**不加 `scale`**（文字放大会发虚）。v4.3 之前这里只动 `opacity`，真机上看起来「标题根本没动」，v4.4 加了小位移才看得出；这也是 `motionTarget` 设为 `row` 时一直保留这个选项、没有被藏进 API 的原因。**5.3.6 起 tab 行也吃 `row` 目标**（标宿主 label span，见 §23.2）。
+- 键名 `data-hotlist-glyph`（字形）/ `data-hotlist-text-motion`（文字动效）/ `data-hotlist-tab-label`（tab 行宿主的 label span）；5.3.5 起 `data-hotlist-burst` 已随 burst 机制删除。
+- **预览**是同一套频率的可视化（5.3.6 起与三处真实表面**完全同源**）：`previewStyle(motion, frequency)` 用 `motionDutyStep(frequency)` 选档、`motionDurationOf` 取周期，返回 `<hl-<motion>-<step>> <周期>ms <timing> infinite`——占空比就是屏幕上看到的占空比。`frequency = 0` 时 `glyphNode` 直接不给 animation。它用 `linear infinite` 常驻循环，所以设置页一打开就能看到频率的实际感觉，滚出视口/卸载即随节点消失；**它不吃 `display.reduceMotion`**（§23.7）。
 
 ## 14. 浮层（popout）：素材、kit 与调用方分工
 
@@ -367,7 +367,7 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 2. **`data-hotlist-chip-motion` / `-target` 在创建时就写**（`client.js:7089-7090`），不是等动画要播了才写。CSS 选择器要能命中「静止的那一帧」，否则第一次渲染是没动效的，用户会看到一下顿帧。
 3. **`data-hotlist-chip-burst` 只写在真的在播的那一颗上**（`client.js:7092`），播完由渲染自然摘掉。写在容器上会让整排一起爆发。
 4. **keyframes 跟着 band 自己的样式表走**（`injectChipCss()` `client.js:7250`，`removeChipCss()` `client.js:7259`），所以侧栏适配器关掉时顶栏照动；`@keyframes hl-spin/hl-pulse/hl-bounce/hl-blink` 与 `hl-text-*` 各八条都在 `CHIP_CSS` 里自带，**不依赖 `SIDEBAR_STYLE` 是否注入**。
-5. **减动效两条盖子、都盖到子节点**：`html[data-hotlist-reduce-motion] [data-hotlist-chip], html[data-hotlist-reduce-motion] [data-hotlist-chip] *`（`:6221`）与 `@media (prefers-reduced-motion:reduce)`（`:6222`）各一条，同时管住胶囊本身、图标 span 与标题 span——只写容器会漏掉真正在动的子节点。
+5. **减动效只有一个来源、一个盖子、盖到子节点**：`motionAllowed(settings, win)` 决定要不要停，`applyReduceMotionAttr()` 把它写成 `html[data-hotlist-reduce-motion]`，胶囊那条规则同时管住容器、图标 span 与标题 span（只写容器会漏掉真正在动的子节点）。**5.3.6 起生成 CSS 里不再有 `@media (prefers-reduced-motion: reduce)`**——媒体查询读不到产品设置，会让 `off` 压不过系统。
 
 **`hl-chip-nudge` 已删除**：它是早期「只播一次」方案的产物，与常驻层叠在一起会互相打断。现在只有常驻与爆发两层。
 
@@ -554,28 +554,54 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 - `audio config: the prompt never leaks a placeholder or a home directory`（`test:5126` 起）：中英两版都不留 `{{`、有绝对路径时不出现 `%USERPROFILE%`、`script:null` 时整句替换。
 - 真机：改文件 → 不点任何按钮 → 最迟一个 `AUDIO_PROBE_TTL_MS` 周期后那一行自己变；点「重新读取」立即变；删掉文件 → 变回「未初始化」而不是留着旧状态。
 
-## 23. 一处动效计划、三处同一节拍（5.3.5）
+## 23. 一处动效计划、三处同一节拍（5.3.5 起；5.3.6 改回频次语义）
 
 用户原话：「顶栏 / Tab 栏 / 侧栏动画统一：只有前两个统一，侧栏不是，不管三个都统一成什么样，都得统一成设置里用户调的样式。」5.3.5 之前的模型是**三套**：tab 座与顶栏胶囊常驻循环（各自写各自的 delay 算式），侧栏 glyph 走 burst 抽签（`motionBursts` + `MOTION_CONCURRENCY`）——同一个会话在三个表面上看起来是三段各跑各的动画。5.3.5 把它们压成一个模型。
 
+5.3.5 同时把 `frequency` 实现成「把时长除掉」的**速度倍率**，这是错的：用户要的是「更稀」，不是「更慢」。5.3.6 把语义改回**频次**（一次播放恒为 `MOTION_MS[motion]`，周期 `= play / frequency`，其余时间停在末帧），并把 keyframes 从三张表里提出来做成**按占空档生成的共享表**——`f = 1` 那一档与 5.3.5 手写表逐停点等价（测试 `f=1 keyframes are the published 5.3.5 table` 把旧表当基线钉住）。
+
 ### 23.1 唯一的出处：`motionPlanOf(settings, sessionId, category, motion, motionTarget)`
 
-四个纯函数（`client.js:2038-2095`，紧接 `motionPhaseOf` `client.js:2032`）：
+纯函数（`client.js:2032-2145` 一带，紧跟 `motionPhaseOf`）：
 
-- `motionTempoOf(frequency)`（`client.js:2038`）— `frequency > 0` 才有效，夹到 `[0.05, 1]`；否则 0（停）。
-- `motionDurationOf(motion, frequency)`（`client.js:2044`）— `base / tempo` 取整；`MOTION_MS = {spin:2400, pulse:1600, bounce:1200, blink:1200}`（`client.js:3444`）是基准，`base / max(freq, 0.05)` 是最终时长。**`frequency` 是三者共用的节奏倍率，不再是「每拍掷一次」的死开关。**
+- `motionDutyStep(frequency)` — `frequency > 0` 才有效，`round(frequency / 0.05)` 夹到 `[1, MOTION_DUTY_STEPS]`（= 20）；否则 0（不播）。
+- `motionPlayMs(motion)` — 一次播放的时长，就是 `MOTION_MS[motion]`（`client.js:3444`：`spin` 2400 / `pulse` 1600 / `bounce` 1200 / `blink` 1200）。**这是常量，`frequency` 永远不许改它。**
+- `motionDurationOf(motion, frequency)` — 返回**周期**而不是单次时长：`round(play * MOTION_DUTY_STEPS / step)`；`frequency = 1` 时 `step = 20`、周期 = `play`。
+- `motionRestMs(motion, frequency)` — `周期 - play`，即两次之间静止多久。
+- `motionKeyframeName(motion, step)` / `motionTextKeyframeName(motion, step)` — `hl-<motion>-<step>` / `hl-text-<motion>-<step>`。
 - `motionDelayCss(phaseMs)`（`client.js:2052`）— 统一拼 `calc(-1 * <N>ms)`，三处字符串可比对。
-- `motionPlanOf(...)`（`client.js:2071`）— 返回 `{motion, motionTarget, durationMs, delayMs, delayCss, animation, textAnimation}`；`motion`/`motionTarget` 可被调用方覆盖（`question` token 已解析成 `glyphSecondary` 时传进来），缺省回退 `categories[category].glyph`；`motion === 'none'` 或 `display.reduceMotion === 'on'` 或 `durationMs === 0` → `{motion:'none', delayCss:'0ms', animation:'', textAnimation:''}`。**`animation` / `textAnimation` 字符串在这里拼好**，三处直接内联写入——`animation-name`、`duration`、`delay` 相等是靠「同一个函数产出」保证的，不是靠三份拷贝恰好一致。
+- `motionPlanOf(...)` — 返回 `{motion, motionTarget, step, playMs, restMs, durationMs, delayMs, delayCss, animationName, textAnimationName, animation, textAnimation}`；`motion`/`motionTarget` 可被调用方覆盖（`question` token 已解析成 `glyphSecondary` 时传进来），缺省回退 `categories[category].glyph`；`motion === 'none'` 或 `motionAllowed(settings) === false` 或 `durationMs === 0` → `{motion:'none', step:0, playMs:0, restMs:0, durationMs:0, delayCss:'0ms', animationName:'', textAnimationName:'', animation:'', textAnimation:''}`。**`animation` / `textAnimation` 字符串在这里拼好**，三处直接内联写入——`animation-name`、`duration`、`delay` 相等是靠「同一个函数产出」保证的，不是靠三份拷贝恰好一致。
+
+### 23.1b 共享关键帧表：`motionKeyframeRules()` + `MOTION_KEYFRAMES`
+
+`MOTION_FRAMES`（glyph：`transform` 前缀 10 处，5.3.6 未动一字）与 `MOTION_TEXT_FRAMES`（文字：`opacity` / 小位移）各 4 个动作；`motionKeyframeRules(frames, nameOf)` 对每个动作生成 20 档：
+
+```js
+const hold = stops[stops.length - 1][1];
+for (let step = 1; step <= MOTION_DUTY_STEPS; step += 1) {
+  const duty = step / MOTION_DUTY_STEPS;
+  const body = stops.map(([at, declaration]) => `${motionPercent(at * duty)}{${declaration}}`);
+  if (duty < 1) body.push(`100%{${hold}}`);          // 保持段停在末帧
+  rules.push(`@keyframes ${nameOf(motion, step)}{${body.join('')}}`);
+}
+```
+
+- 8 个动作 × 20 档 = **160 个 `@keyframes`**，实测 glyph 10,072 B + text 16,154 B = 26,226 B。
+- `if (duty < 1) body.push('100%{hold}')` 是关键：`rotate(360deg)` 与 `0deg` 视觉等价，但必须显式停在**末帧的声明**上，不能停在中间角度（否则看起来像卡住）。守卫测试 `duty keyframes are well formed and hold the end frame` 钉住这条。
+- 注入：`ensureMotionCss()` 建 `<style data-hotlist-style="motion">`（幂等）；`removeMotionCss()` 只在其余三个表面样式都不在了才删。四个注入点（`ensureStyles` / `injectTabCss` / `injectChipCss` / `injectPageCss`）都调 `ensureMotionCss()`。
+- 因此三张表面表（`SIDEBAR_STYLE` / `TAB_CSS` / `CHIP_CSS`）**不再自带 keyframes**，只留 `animation-timing-function` + `animation-iteration-count`（+ `will-change`），`animation-name` 由 JS 内联写。
 
 ### 23.2 三处怎么用它（写入点）
 
 | 表面 | 写入点 | 写什么 |
 |---|---|---|
-| 侧栏 glyph | `applyMotion(settings, rows)`（`client.js:3859`，`createSidebarAdapter` 内 refresh 末尾调） | `marker.host` 设 `data-hotlist-motion` + 内联 `animation-duration` / `animation-delay`；`row` 目标再 `animateTitle(marker, plan)` 写标题 span |
-| tab 座 | `decorateTabSeat(settings, seat)`（`client.js:6717`，由 `decorateTabSeats` `client.js:6771` 遍历） | 永远只动 glyph span（5.3.4 的取舍不变：tab 座不动宿主标题）；`plan.delayCss` 写 `animation-delay`，`plan.durationMs` 写 `animation-duration` |
-| 顶栏胶囊 | `topbarChips(settings, plan)`（`client.js:6986`）→ `topbarChipNode(chip)`（`client.js:7094`） | 内联 `animation-delay` / `animation-duration` 放到 emoji span（`glyph` 目标）或标题 span（`row` 目标） |
+| 侧栏 glyph | `applyMotion(settings, rows)`（`client.js` 内，`createSidebarAdapter` 的 refresh 末尾调） | `marker.host` 设 `data-hotlist-motion` + 内联 `animation-name` / `animation-duration` / `animation-delay`；`row` 目标再 `animateTitle(marker, plan)` 写标题 span |
+| tab 座 | `decorateTabSeat(settings, seat)`（由 `decorateTabSeats` 遍历）+ `paintTabLabel(label, plan, delay)` | **5.3.6 起** `row` 目标给宿主自己的 `<span class="…tabLabel">` 打 `data-hotlist-tab-label` 并内联写文字动画；`glyph` 目标仍只动 glyph span。两者互斥，`rowTarget` 为真时 glyph 的 `data-hotlist-motion` 记 `none`（同一节点内骑同一趟位移，不叠两趟） |
+| 顶栏胶囊 | `topbarChips(settings, plan)` → `topbarChipNode(chip)` | 内联 `animation-name` / `animation-delay` / `animation-duration` 放到 emoji span（`glyph` 目标）或标题 span（`row` 目标） |
 
-三处各自仍带自己的样式表（`SIDEBAR_STYLE` `client.js:3449` / `TAB_CSS` `client.js:6663` / `CHIP_CSS` `client.js:7237`，keyframes 重复定义无害），CSS 管 `animation-name` + `timing` + `will-change`，内联只盖 `duration` 与 `delay` 两个长属性——所以频率变了不用动 CSS。
+三处各自仍带自己的样式表（`SIDEBAR_STYLE` / `TAB_CSS` / `CHIP_CSS`），但只写 `animation-timing-function` 与 `animation-iteration-count`（+ `will-change`）；**keyframes 与 `animation-name` 都来自共享表 + JS**，所以改占空档不用动这三张表。
+
+**tab 行 `row` 目标的三条硬约束**（5.3.4 曾因包 wrapper 被回退，5.3.6 不再重犯）：① 只给宿主现成元素加属性，**不包 wrapper、不 clone、不改它的 `display`**；② 把 glyph 搬出 label 当兄弟节点会让宿主 tab 高度 35 → 38 px、tab 行 25 → 28 px（实测），所以不搬；③ 宿主若把标题渲染成 button 下的裸文本节点（没有 label 元素），`row` 退回只动 glyph——这条写进 README / AGENTS 的已知限制。
 
 ### 23.3 相位种子
 
@@ -587,20 +613,38 @@ v5.2 加超级提醒（`ring.*` 三开关 + `index.js` 的 `/hotlist-ring` 路�
 
 ### 23.5 预览与文案
 
-- `previewStyle(motion, frequency)`（`client.js:4139`）改用 tempo 语义：`hl-pv-<motion>-20 <motionDurationOf>ms linear infinite`（始终满占空比、频率只拉长周期），`PREVIEW_STEPS = 20`（`client.js:4113`）的其余档位 keyframes 仍生成但不再被引用。
-- 设置页滑块文案：zh「节奏倍率：0% 停；100% 原速；越低越慢。顶栏、Tab 栏、侧栏三处一起变。」/ en「Tempo: 0% stops; 100% is the base speed; lower is slower. The top bar, the tab row and the sidebar all change together.」
+- `previewStyle(motion, frequency)` 与三处真实表面**完全同源**：`motionDutyStep(frequency)` 选档、`motionDurationOf` 取周期，返回 `` `${motionKeyframeName(motion, step)} ${duration}ms ${timing} infinite` ``。所以设置页里看到的占空比就是侧栏 / tab 行 / 顶栏上的占空比（包括「播三成、停七成」这种稀疏档）。
+- 设置页滑块文案：zh「播放频率：0% 不播；100% 一直播；越往左越稀。每一下的动作速度不变，顶栏、Tab 栏、侧栏三处一起变。」/ en「Playback frequency: 0% never plays; 100% plays back to back; further left is rarer. The speed of each play never changes, and the top bar, the tab row and the sidebar change together.」
+- **预览不吃 `display.reduceMotion`**：预览是用户唯一能看见「我选的动作长什么样」的地方，冻掉等于盲选。`motionAllowed()` 的注释里写死了这条，别顺手把它接进来（见 §23.7）。
 
-### 23.6 真机读数（2026-11-17，meru-test 59585，5.3.5）
+### 23.6 真机读数（2026-11-17，meru-test 59585）
 
-同一个会话（`error` 类，`glyph.motionTarget` 先设 `glyph`）在同一时刻三处 `getAnimations()` / `getComputedStyle` 的读数：
+**5.3.6 频次语义（tab 行 `row` 目标，`pinned` 类默认 `bounce` + `frequency 0.3`）**：
 
-| 表面 | `animationName` | `animationDuration` | `animationDelay` | `iterationCount` |
-|---|---|---|---|---|
-| 顶栏胶囊 emoji（`[data-hotlist-chip-emoji]`） | `hl-bounce` | `1.2s`（1200ms） | `-0.032s`（-32ms） | `infinite` |
-| tab 座 glyph（`[data-hotlist-tab-glyph]`） | `hl-bounce` | `1.2s` | `-0.032s` | `infinite` |
-| 侧栏 glyph（`[data-hotlist-glyph]`） | `hl-bounce` | `1.2s` | `-0.032s` | `infinite` |
+| 设置 | `animationName` | `animationDuration` | 活动段内 40 点采样 |
+|---|---|---|---|
+| `frequency = 1` | `hl-text-bounce-20` | `1.2s` | 变化样本 40/40，中位 **5.0 px/s** |
+| `frequency = 0.3` | `hl-text-bounce-6` | `4s` | 变化样本 32/40（静止段全 0），中位 **5.1 px/s** |
 
-- 这三行就是 §23.3 的兑现：当时该会话所在类别的 `frequency` 是 `1`，所以 `motionDurationOf('bounce', 1) = 1200`；`delay = fnv1a(sessionId|'error') % 1200 = 32`。（换成默认 `0.9` 就是 `round(1200/0.9) = 1333`——同一函数、不同输入，三处一起变。）
-- 把 `motionTarget` 换回默认 `row` 后，胶囊的动画落在标题 span 上：`hl-text-bounce / 1.2s / -0.032s`，而 tab 座与侧栏仍动 glyph（`hl-bounce`）。**名字差一个 `text-` 前缀、时长与相位完全相同**——这是 tab 行「不 wrap 宿主标题」那条取舍的必然结果（§23.2）。
-- 把该类的「节奏倍率」调到 0：三处 `animationName` 全变 `none`、`getAnimations().length === 0`。
-- **Web 的一个已知观感限制**：网页版没有窗口标题带，`topbar.previewInWeb` 开的预览条画在页面 `top:0`（实测 `(0,0,1264,40)`、胶囊 `(288,8,90,24)`），会被宿主自己的页头盖住——数值与动画都在跑，但**截图里看不见那颗胶囊**。要肉眼验收三处同屏，用桌面版。
+- 两次 400 ms 位移：`f=1` **1.817 px**；`f=0.3` 落在静止段 **0.000 px**。→ **单次速度同量级、出现频率变稀**，这就是「频次不是速度」的实测证据。
+- `spin` 对照：`f=1` → `hl-text-spin-20 / 2.4s`，`f=0.3` → `hl-text-spin-6 / 8s`（后者的 6 次 400 ms 采样全 0，正处静止段）。
+- 布局：动效期间 tab 按钮恒 35 px、tab 行恒 25 px；label 高 16 px、`overflow:hidden`，动画最深处相对溢出恒 1 px（宿主基线，不是新裁切）。
+
+**5.3.5 三处同节拍（历史读数，`frequency = 1`、`glyph` 目标）**：
+
+| 表面 | `animationName` | `animationDuration` | `animationDelay` |
+|---|---|---|---|
+| 顶栏胶囊 emoji | `hl-bounce` | `1.2s`（1200ms） | `-0.032s` |
+| tab 座 glyph | `hl-bounce` | `1.2s` | `-0.032s` |
+| 侧栏 glyph | `hl-bounce` | `1.2s` | `-0.032s` |
+
+- 这三行是 §23.3 的兑现：`delay = fnv1a(sessionId|'error') % 1200 = 32`。5.3.6 起同样的输入产出 `hl-bounce-20`，停点与 5.3.5 的 `hl-bounce` 逐项相同。
+- **Web 的一个已知观感限制**：网页版没有窗口标题带，`topbar.previewInWeb` 开的预览条画在页面 `top:0`，会被宿主自己的页头盖住——数值与动画都在跑，但**截图里看不见那颗胶囊**。要肉眼验收三处同屏，用桌面版。
+
+### 23.7 `display.reduceMotion`：三档、一个判据、四个表面
+
+- **唯一判据** `motionAllowed(settings, win)`：`on` → `false`（停）；`off` → `true`（强制动）；`auto` → `prefersReducedMotion(win) === false`。5.3.6 之前每个表面各自用 `reduceMotion === 'on'` 加一段 `@media (prefers-reduced-motion: reduce)` 重新推导，结果 `auto` 只被半遵守、`off` 压不过系统设置——现在所有调用者都问这一个函数。
+- **发布方式** `applyReduceMotionAttr(settings, doc)`：把判据结论写到 `html[data-hotlist-reduce-motion]`，CSS 只读这个根属性。发布点六处（`injectPageCss` / `injectViewCss` / `injectTabCss` / `injectChipCss` 各在上完样式后、侧栏 `tick`/`refresh`、`onSettingsChange` effect 里 `sync()` 之前），所以即使侧栏适配器没活着，设置页打开时属性也是对的。
+- **覆盖的四个真实表面**：侧栏 glyph + 标题、tab 行 glyph + label、顶栏胶囊及其后代、「缺失分组」的展开箭头 `transition` 与 `hlMissingIn` 入场。
+- **`!important` 已从这些规则上去掉**，前提是 JS 在停用时**不写内联 `animation-name`**。顺序不能反：先让 JS 认判据，再删 CSS 的 `!important`，否则中间态会让动画漏出来。
+- **预览永不受影响**（§23.5）。测试 `reduce stops the real surfaces and never the preview` 用真值表 + 三道 gate 钉住：生成 CSS 里不许再出现 `@media (prefers-reduced-motion`、源码里不许再手写 `reduceMotion === …` 比较、预览那条 `const animate = glyph.motion …` 不许出现 `motionAllowed`。

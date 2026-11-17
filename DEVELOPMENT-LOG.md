@@ -3,6 +3,26 @@
 > 规则：只记用户纠正过我什么、我改了什么、怎么改的，以及**已经定稿、不许再动**的部分。
 > 目的只有一个：同一件事不要被优化第二遍。每条都带日期，新的写在上方。
 
+## 2026-11-17 · 频率语义改回「多久播一次」+ reduceMotion 单源 + tab 行 row 目标（5.3.6）
+
+**用户的纠正**：「动作频率又变成了动作速度？？？为什么老是改老代码还改错？？」
+
+**改之前的现状**：5.3.5 把 `frequency` 实现成速度倍率——`motionDurationOf` 直接 `return base / max(frequency, 0.05)`，设置页文案也改成了「节奏倍率 / 0% 停；100% 原速；越低越慢」。于是滑块往左拖是**把每一下的动作拉长**，用户要的是「更稀」。4.4 起这个字段的定义一直是**频次**（`CATEGORY_FREQUENCY` 的注释「`1` = every tick, `0` = never」还在，注释和实现已经对不上）。同一轮还欠着两件：`display.reduceMotion` 被五段 `@media (prefers-reduced-motion)` + `!important` 硬压，用户设 `off` 也压不过系统；`motionTarget: 'row'` 在 tab 行从来只动图标，设置承诺没兑现。
+
+**怎么改的**：
+1. 频率回到频次、单次时长恒定：`motionDutyStep(frequency)`（`round(f/0.05)` 夹 1–20）、`motionPlayMs(motion)`（= `MOTION_MS`，**一个数都没改**）、`motionDurationOf` 改为返回**周期** `round(play * 20 / step)`、`motionRestMs = 周期 - play`。`f=1` 连着播、`f=0` 不播、`f=0.3` + `bounce` = 播 1200ms 停 2800ms。
+2. keyframes 从三张表里提出来做成共享表：`motionKeyframeRules()` 按占空档生成 8 动作 × 20 档 = 160 个 `@keyframes`，注入 `<style data-hotlist-style="motion">`；三张表面表只剩 timing + iteration，`animation-name` 由 JS 内联写。`f=1` 那档与 5.3.5 手写表**逐停点等价**，被 `f=1 keyframes are the published 5.3.5 table` 当基线钉住；保持段一律显式停**末帧**（`rotate(360deg)` 不能停在半圈）。`PREVIEW_FRAMES` 的 10 处 `transform:` 前缀一字未动，只补了守卫测试。
+3. reduceMotion 收成一个判据：`motionAllowed(settings, win)`（`on` 停 / `off` 强制动 / `auto` 跟 `matchMedia`），`applyReduceMotionAttr()` 把它写成 `html[data-hotlist-reduce-motion]`，删掉四段媒体查询与它们的 `!important`，`VIEW_CSS` 那条纯 CSS 保护保留、触发源换根属性。**顺序是先让 JS 在停用时不再写内联 `animation-name`，再删 `!important`**——反过来中间态会让动画漏出来。
+4. tab 行 `row` 目标：真机先验过宿主 `<span class="…tabLabel">` 持裸文本节点，于是 `paintTabLabel()` 给它打 `data-hotlist-tab-label` 并内联写文字动画，glyph 记 `none`（同一节点骑同一趟位移，不叠两趟）。**不包 wrapper、不 clone、不改宿主 `display`**；把 glyph 搬出 span 会让 tab 高度 35 → 38 px（实测），所以不搬。宿主没有 label 元素的旧形态退回只动图标。
+5. 文案回频次口径（zh「播放频率 · 0% 不播；100% 一直播；越往左越稀。每一下的动作速度不变」/ en「Playback frequency …」），「节奏倍率 / Tempo / 越低越慢」清干净。`VERSION` → 5.3.6，`SETTINGS_VERSION` 仍 4（字段名与范围没变，不需要迁移）。测试 126 → 132 组。
+
+**已定稿，不许再动**：
+- `frequency` 是**频次**，不是速度。任何人想把 `duration` 再除一次频率，先看 `frequency is a duty cycle, not a speed` 这条测试。
+- `MOTION_MS` 的四个数值是当前节奏，属于已发布语义，不得借「调手感」之名改。
+- 三处表面**同 keyframes、同单次时长、同相位种子**（`fnv1a(sessionId|category)`）；「侧栏恢复随机脉冲」「各处独立调频」都是倒退。
+- `display.reduceMotion` 的适用范围 = **侧栏 / tab 行 / 顶栏 / 缺失分组**，**永不含设置页预览**。预览是用户唯一能看见所选动作的地方，冻掉等于盲选。
+- tab 行只许给宿主现成元素打属性，**不许包 wrapper**（5.3.4 就是这么被回退的），也不许为「图标静止」去改宿主布局（会 +3 px）。
+
 ## 2026-11-17 · 三处动效统一成一份共享计划（5.3.5）
 
 **用户的纠正**：「顶栏 / Tab 栏 / 侧栏动画统一：只有前两个统一，侧栏不是，不管三个都统一成什么样，都得统一成设置里用户调的样式」

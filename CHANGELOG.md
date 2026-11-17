@@ -1,5 +1,18 @@
 # Changelog
 
+## 5.3.6 — 2026-11-17
+
+**修复：`frequency` 改回「多久播一次」，不是「动得多快」。** 用户原话：「动作频率又变成了动作速度？？？为什么老是改老代码还改错？？」——5.3.5 把频率直接除进时长（`duration = base / max(f, 0.05)`），于是把滑块往左拖是把**每一下的动作拉长**，用户要的是「更稀」，不是「更慢」。
+
+- **单次时长恒定**：一次播放永远是 `MOTION_MS[motion]`（`spin 2400` / `pulse 1600` / `bounce 1200` / `blink 1200`，一个数都没改）；`frequency` 只决定隔多久播下一次——周期 = `play / f`，播放占前 `f` 那一份，其余时间**停在末帧**（`rotate(360deg)` 与 `0deg` 视觉等价，不会停在半个角度）。`f = 1` 连着播、`f = 0` 不播、`f = 0.3` + `bounce` = 播 1200ms 停 2800ms。实现：`motionDutyStep` / `motionPlayMs` / `motionDurationOf`（返回周期）/ `motionRestMs` / `motionKeyframeName`。
+- **keyframes 提到模块级共享表**：`motionKeyframeRules()` 一次生成 8 个动作 × 20 个占空档 = 160 个 `@keyframes`，注入在 `<style data-hotlist-style="motion">`，三处表面引用同一个 `hl-*-<step>` 名字；`SIDEBAR_STYLE` / `TAB_CSS` / `CHIP_CSS` 不再自带 keyframes，`animation-name` 由 JS 内联写。`f = 1` 那一档与 5.3.5 手写表**逐停点等价**（`f=1 keyframes are the published 5.3.5 table` 把旧表当基线比对）。
+- **`display.reduceMotion` 变成三档单一判据**：新增 `motionAllowed(settings, win)`（`on` → 停 / `off` → 动 / `auto` → 跟随 `matchMedia`），四个真实表面（侧栏 / tab 行 / 顶栏 / 缺失分组）都只问它；删掉 4 段 `@media (prefers-reduced-motion: reduce)` 与其上的 `!important`，改用根属性 `html[data-hotlist-reduce-motion]` 驱动。**设置页预览永不因它停**——预览是用户唯一能看见所选动作的地方，冻掉等于盲选；这一条写在 `motionAllowed` 的注释里，不要再「统一」。
+- **tab 行 `row` 目标真的动标题**：给宿主自己的 `span[class*="tabLabel"]` 打 `data-hotlist-tab-label` 承载文字 keyframes，**不包 wrapper、不 clone、不改宿主 `display`**（5.3.4 就是包 wrapper 被回退的）。tab 按钮 35px、tab 行 25px 实测前后不变；glyph 在同一节点内骑同一趟位移，所以它的 `data-hotlist-motion` 记 `none`——一趟位移，不是两趟。宿主没有 label 元素的旧形态回落只动图标。
+- 设置页文案改回频次口径：zh「播放频率 · 0% 不播；100% 一直播；越往左越稀。每一下的动作速度不变，顶栏、Tab 栏、侧栏三处一起变。」/ en「Playback frequency · 0% never plays; 100% plays back to back; further left is rarer. The speed of each play never changes…」。「节奏倍率 / Tempo / 越低越慢」的残留全部清掉。
+- 测试 126 → 132 组：新增 `frequency is a duty cycle, not a speed` / `f=1 keyframes are the published 5.3.5 table` / `duty keyframes are well formed and hold the end frame` / `every motion frame is a property declaration with a value` / `a row target animates the host tab label, not a wrapper` / `reduce stops the real surfaces and never the preview`。红灯实验 7 次（删静止段、改脉冲峰值、丢 `transform:` 前缀、时长公式反向、塞回媒体查询、手写 `reduceMotion ===`、把 `motionAllowed` 接进预览）逐条验证会红。
+- 真机（meru-test 59585，tab 行「库管」座位）：`f=1` → `hl-text-bounce-20` / `1.2s`，`f=0.3` → `hl-text-bounce-6` / `4s`；活动段 50ms 采样 40 点，中位速度 **5.0 vs 5.1 px/s**（同速）、变化样本 **40/40 vs 32/40**（变稀）；两次 400ms 位移 `f=1` **1.817px**、`f=0.3` 静止段 **0.000px**。`reduceMotion` 三档实测：`on` 时标记 0 / 在跑动画 0 / 根属性 `""`。
+- `VERSION` / `package.json.version` → `5.3.6`；`SETTINGS_VERSION` 仍 `4`，无迁移（频率语义变了，但字段名与取值范围没变）。
+
 ## 5.3.5 — 2026-11-17
 
 **三处动效统一成一份计划。** 用户原话：「顶栏 / Tab 栏 / 侧栏动画统一：只有前两个统一，侧栏不是，不管三个都统一成什么样，都得统一成设置里用户调的样式。」5.3.5 之前是三套模型：tab 座与顶栏胶囊常驻循环、侧栏 glyph 走 burst 抽签（`motionBursts` + `MOTION_CONCURRENCY` 限并发）。现在三处全部从同一个 `motionPlanOf(settings, sessionId, category, motion, motionTarget)` 派生：同一套 keyframes、同一个时长、同一个相位种子（`fnv1a(sessionId|category)`），一个会话在哪个表面上看起来都是同一段动画。

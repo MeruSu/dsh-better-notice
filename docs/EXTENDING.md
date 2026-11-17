@@ -34,7 +34,7 @@ api.lastError()        // 最近一次写盘错误（字符串或 null）
 ```
 
 同一对象也挂在旧名 `window.__SESSION_SWITCHER_SETTINGS__`（v2.x 兼容，别在新代码里用）。
-插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.5'`）。
+插件版本号在 `window.__HOTLIST_VERSION__`（当前 `'5.3.6'`）。
 
 写设置后不需要刷新页面：tab、侧栏、设置页都在同一个 store 上重算。
 
@@ -189,8 +189,8 @@ window.__HOTLIST__.audio();
     value: '📌',                // emoji 文本（source='upload' 时忽略）
     uploads: [],                // [{ name, dataUrl }]，source='upload' 时按会话定种取一张
     motion: 'bounce',           // none | spin | pulse | bounce | blink（默认按类：pinned/error/pending bounce、completed/running spin、idle none）
-    motionTarget: 'row',        // 'glyph' 只动图标 | 'row' 图标+标题（侧栏行与顶栏胶囊生效；tab 座位恒动图标，宿主 tab 文本永不被包）
-    frequency: 0.9,             // 0–1，步进 0.05：每 1s 掷一次骰子，1 = 每个节拍都播，0 = 该类永不动（默认按类：0.3 / 0.9 / 0.9 / 1 / 1 / 0）
+    motionTarget: 'row',        // 'glyph' 只动图标 | 'row' 图标+标题（侧栏行、顶栏胶囊、tab 行都生效；tab 行是给宿主自己的 label span 打 data-hotlist-tab-label，不包 wrapper）
+    frequency: 0.9,             // 0–1，步进 0.05，**播放频率**：一次播放恒为 MOTION_MS[动作]，周期 = 播放 / 频率，其余时间停末帧；1 = 连着播，0 = 该类永不播（默认按类：0.3 / 0.9 / 0.9 / 1 / 1 / 0）
   },
   glyphSecondary: null,         // 仅 pending 有：❓ 小图标，同样带 motion
   popout: {
@@ -418,7 +418,7 @@ await fetch('/hotlist-ring?cat=pending&seconds=4&scope=Primary&anim=Gif',
 
 ---
 
-## 9. 这一版的类别判定优先级（v5.3.5）
+## 9. 这一版的类别判定优先级（v5.3.6）
 
 **一个会话只属于一个类别。** `classify()` 从上往下走，第一条命中的就定了，后面的条件不再看。
 

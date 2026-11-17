@@ -43,9 +43,9 @@
  * static `<img>`, both animating through the same CSS keyframes on the outer
  * span. Motion is pure CSS (`transform`/`opacity` only), pauses through root
  * attributes while the page is hidden, and respects reduce-motion. One shared
- * motion model (5.3.5): the band pill, the tab seat and the sidebar glyph all
+ * motion model (5.3.6): the band pill, the tab seat and the sidebar glyph all
  * derive their animation from the same `motionPlanOf` — same keyframes, same
- * duration (base tempo divided by `frequency`), same phase
+ * cycle, same phase
  * (`fnv1a(sessionId|category)`), so one session looks like one animation on
  * every surface. `motionTarget: 'row'` also drives the
  * host title span inline (opacity/translate only — text never scales). The
@@ -83,7 +83,7 @@ window.__ModuleLoader__.load({
 
     const SLOT = 'conversation.view';
     const NS = 'hotlist';
-    const VERSION = '5.3.5';
+    const VERSION = '5.3.6';
     /** Seat view ids are namespaced so a persisted leftover can be recognised and repaired. */
     const SEAT_PREFIX = 'hotlist-seat-';
     /** Every prefix ever written for a seat id; a persisted one is repaired back to `chat` on load. */
@@ -313,14 +313,16 @@ window.__ModuleLoader__.load({
     /** What a glyph shows: an emoji, an uploaded image, or that category's popout artwork. */
     const GLYPH_SOURCES = ['emoji', 'upload', 'popout'];
     /**
-     * The playback slider is one shared **tempo**, not a lottery: `1` is the base
-     * tempo of a motion, lower is slower, and `0` is the explicit "never animate
-     * this class" switch. Every surface divides the same base duration by it, so
-     * moving this slider changes the band, the tab row and the sidebar together.
+     * The playback slider is a shared **duty cycle**, never a speed: `1` plays the
+     * motion back to back, `0` never plays it, and `0.3` plays the same motion at
+     * the same speed but leaves a pause after it. One play always lasts exactly
+     * `MOTION_MS[motion]`; the slider only decides how long the silence is
+     * (`play * (1 - f) / f`), so the cycle is `play / f`. Every surface reads this
+     * one number, so the band, the tab row and the sidebar stay in step.
      */
     const MOTION_FREQUENCY = { min: 0, max: 1, step: 0.05, fallback: 1 };
-    /** The tempo the slider can ask for: 5% is 20× slower than 100%. */
-    const MOTION_TEMPO = { min: 0.05, max: 1 };
+    /** How many duty steps the slider can express: one step is 5% of the cycle. */
+    const MOTION_DUTY_STEPS = Math.round(1 / MOTION_FREQUENCY.step);
     /** Timing function per motion: the same one on all three surfaces, or the beat drifts. */
     const MOTION_TIMING = { spin: 'linear', pulse: 'ease-in-out', bounce: 'ease-in-out', blink: 'ease-in-out' };
     /** Builds up to 4.3 stored an average interval; 2000ms meant "as often as possible". */
@@ -350,13 +352,14 @@ window.__ModuleLoader__.load({
      */
     const RECENT_WINDOW_UI = { min: 1, max: 120 };
     /**
-     * One shared motion model (5.3.5): the band pill, the tab seat and the
+     * One shared motion model (5.3.6): the band pill, the tab seat and the
      * sidebar glyph all run the *same* continuous animation for a category —
-     * same keyframes, same duration, same phase. `frequency` is one shared
-     * tempo the three of them divide their base duration by; `motionTarget`
-     * says which node carries it. `0` is the explicit off switch.
+     * same keyframes, same cycle, same phase. `frequency` is one shared **duty
+     * cycle**: it decides how long the silence after each play is, never how
+     * fast the play is. `motionTarget` says which node carries it. `0` is the
+     * explicit off switch.
      */
-    // frequency decides the tempo (see MOTION_TEMPO); nothing rolls a lottery here.
+    // frequency only decides how often a play happens; see motionDutyStep.
     const OVERLAY_SIDES = ['auto', 'left', 'right'];
     /** Popout artwork is sized in CSS px; the two bounds clamp a single global min/max pair. */
     const OVERLAY_SIZE = { min: 120, max: 900, fallbackMin: 260, fallbackMax: 520 };
@@ -922,7 +925,7 @@ window.__ModuleLoader__.load({
         topbar: { mode: 'chips', titleMode: 'custom', maxSeats: 6, previewInWeb: false, rightReservePx: TOPBAR_RESERVE.fallback, chipWidthPct: CHIP_PCT.fallback, customScope: defaultCustomScope() },
         takeOverStatusDot: true,
         hideNativeDot: true,
-        /** One shared tempo (5.3.5): `glyph.frequency` moves the top bar, the tab row and the sidebar together. */
+        /** One shared duty cycle (5.3.6): `glyph.frequency` moves the top bar, the tab row and the sidebar together. */
         display: { reduceMotion: 'auto' },
         shortcuts: { jumpEnabled: true, overlayEnabled: false, overlayKey: 'Alt+Shift+S' },
         overlay: { side: 'auto', sizeMin: OVERLAY_SIZE.fallbackMin, sizeMax: OVERLAY_SIZE.fallbackMax, fallbackImage: '' },
@@ -1061,8 +1064,8 @@ window.__ModuleLoader__.load({
       'settings.motionTarget': '作用于',
       'settings.motionTarget.glyph': '仅图标',
       'settings.motionTarget.row': '图标+标题',
-      'settings.frequency': '节奏倍率',
-      'settings.frequencyHint': '0% 停；100% 原速；越低越慢。顶栏、Tab 栏、侧栏三处一起变。',
+      'settings.frequency': '播放频率',
+      'settings.frequencyHint': '0% 不播；100% 一直播；越往左越稀。每一下的动作速度不变，顶栏、Tab 栏、侧栏三处一起变。',
       'settings.glyphFollowHint': '跟随',
       'settings.position.tab': '对话区 tab 行',
       'settings.position.tabHint': '显示在对话区上方；桌面版与网页版都可用。',
@@ -1283,8 +1286,8 @@ window.__ModuleLoader__.load({
       'settings.motionTarget': 'Applies to',
       'settings.motionTarget.glyph': 'Glyph only',
       'settings.motionTarget.row': 'Glyph + title',
-      'settings.frequency': 'Tempo',
-      'settings.frequencyHint': '0% stops; 100% is the base speed; lower is slower. The top bar, the tab row and the sidebar all change together.',
+      'settings.frequency': 'Playback frequency',
+      'settings.frequencyHint': '0% never plays; 100% plays back to back; further left is rarer. The speed of each play never changes, and the top bar, the tab row and the sidebar change together.',
       'settings.glyphFollowHint': 'Follows',
       'settings.position.tab': 'Conversation tab row',
       'settings.position.tabHint': 'Shown above the conversation area; available in both the desktop app and a web page.',
@@ -2027,25 +2030,50 @@ window.__ModuleLoader__.load({
      * One deterministic start offset per (sessionId, category): the band, the tab
      * row and the sidebar glyph open the same keyframe at the same point, so all
      * three surfaces of one session always look like one animation. `durationMs`
-     * already carries the shared tempo; this says where in the cycle it starts.
+     * is the shared cycle; this says where in it the play starts.
      */
     function motionPhaseOf(sessionId, category, durationMs) {
       if (Number.isFinite(durationMs) === false || durationMs <= 0) return 0;
       return fnv1a(String(sessionId) + '|' + String(category)) % Math.round(durationMs);
     }
 
-    /** The tempo the slider asks for: `0` is the explicit off switch, both bounds are inclusive. */
-    function motionTempoOf(frequency) {
+    /** The duty step the slider asks for: `0` is the explicit off switch, `20` is back to back. */
+    function motionDutyStep(frequency) {
       if (!(frequency > 0)) return 0;
-      return clamp(frequency, MOTION_TEMPO.min, MOTION_TEMPO.max);
+      return clamp(Math.round(frequency / MOTION_FREQUENCY.step), 1, MOTION_DUTY_STEPS);
     }
 
-    /** How long one cycle lasts `frequency` faster or slower than the base tempo. */
+    /** One play, at the one speed this motion has ever had: the slider never touches it. */
+    function motionPlayMs(motion) {
+      return MOTION_MS[motion] ?? 0;
+    }
+
+    /**
+     * One full cycle: the play plus the silence that makes it rare (`play / duty`).
+     * At `frequency` 1 the silence is 0 and this equals the play length, which is
+     * why every published duration assertion still reads the same number.
+     */
     function motionDurationOf(motion, frequency) {
-      const base = MOTION_MS[motion] ?? 0;
-      const tempo = motionTempoOf(frequency);
-      if (base === 0 || tempo === 0) return 0;
-      return Math.round(base / tempo);
+      const play = motionPlayMs(motion);
+      const step = motionDutyStep(frequency);
+      if (play === 0 || step === 0) return 0;
+      return Math.round(play * MOTION_DUTY_STEPS / step);
+    }
+
+    /** The silence between two plays: 0 at `frequency` 1, equal to the play at 0.5. */
+    function motionRestMs(motion, frequency) {
+      const cycle = motionDurationOf(motion, frequency);
+      return cycle === 0 ? 0 : cycle - motionPlayMs(motion);
+    }
+
+    /** The `@keyframes` a duty step needs: one name per (motion, step), shared by every surface. */
+    function motionKeyframeName(motion, step) {
+      return `hl-${motion}-${step}`;
+    }
+
+    /** The title flavour of the same name, so a `row` target reads the same step. */
+    function motionTextKeyframeName(motion, step) {
+      return `hl-text-${motion}-${step}`;
     }
 
     /** The one negative delay spelling all three surfaces write, so equality is a string compare. */
@@ -2054,15 +2082,17 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * **One motion, three surfaces** (5.3.5). The band pill, the tab seat and the
+     * **One motion, three surfaces** (5.3.6). The band pill, the tab seat and the
      * sidebar glyph all ask this function instead of each deriving its own idea:
      *
      *   - `motion` / `motionTarget` — the caller's resolved pick (e.g. a `question`
      *     token resolves to `glyphSecondary`), falling back to the category glyph;
-     *   - `durationMs` — the base duration divided by the shared tempo (`frequency`),
-     *     so the slider moves all three at once instead of only the sidebar;
+     *   - `playMs` — one play, at the motion's one speed; the slider never touches it;
+     *   - `durationMs` — one full cycle = play + silence (`play / duty`), so the
+     *     slider changes how **often** a play happens without changing how fast it is;
+     *   - `animationName` / `textAnimationName` — the `@keyframes` for this duty step;
      *   - `delayMs` — the same seed `fnv1a(sessionId|category)` for all three, so one
-     *     session in one class opens the keyframe at the same point everywhere.
+     *     session in one class opens the cycle at the same point everywhere.
      *
      * `animation` / `textAnimation` are the exact strings a surface writes inline;
      * building them here is what keeps `animation-name`, `duration` and `delay`
@@ -2075,21 +2105,43 @@ window.__ModuleLoader__.load({
       const resolvedTarget = motionTarget ?? glyph.motionTarget;
       const motionName = MOTION_NAMES.includes(resolvedMotion) ? resolvedMotion : 'none';
       const target = MOTION_TARGETS.includes(resolvedTarget) ? resolvedTarget : 'glyph';
-      const off = motionName === 'none' || settings?.display?.reduceMotion === 'on';
+      const off = motionName === 'none' || motionAllowed(settings) === false;
+      const step = off ? 0 : motionDutyStep(glyph.frequency);
+      const playMs = off ? 0 : motionPlayMs(motionName);
       const durationMs = off ? 0 : motionDurationOf(motionName, glyph.frequency);
-      if (durationMs === 0) {
-        return { motion: 'none', motionTarget: target, durationMs: 0, delayMs: 0, delayCss: '0ms', animation: '', textAnimation: '' };
+      if (durationMs === 0 || playMs === 0) {
+        return {
+          motion: 'none',
+          motionTarget: target,
+          durationMs: 0,
+          playMs: 0,
+          restMs: 0,
+          step: 0,
+          animationName: '',
+          textAnimationName: '',
+          delayMs: 0,
+          delayCss: '0ms',
+          animation: '',
+          textAnimation: '',
+        };
       }
       const delayMs = motionPhaseOf(sessionId, category, durationMs);
       const timing = MOTION_TIMING[motionName] ?? 'linear';
+      const animationName = motionKeyframeName(motionName, step);
+      const textAnimationName = motionTextKeyframeName(motionName, step);
       return {
         motion: motionName,
         motionTarget: target,
         durationMs,
+        playMs,
+        restMs: durationMs - playMs,
+        step,
+        animationName,
+        textAnimationName,
         delayMs,
         delayCss: motionDelayCss(delayMs),
-        animation: `hl-${motionName} ${durationMs}ms ${timing} infinite`,
-        textAnimation: `hl-text-${motionName} ${durationMs}ms ${timing} infinite`,
+        animation: `${animationName} ${durationMs}ms ${timing} infinite`,
+        textAnimation: `${textAnimationName} ${durationMs}ms ${timing} infinite`,
       };
     }
 
@@ -3440,7 +3492,7 @@ window.__ModuleLoader__.load({
     const MAX_MISSES = 60;
     const MISS_RETRY_MS = 30 * 1000;
     const SIDEBAR_TICK_MS = 1000;
-    /** How long one animation cycle runs at the base tempo; the shared slider divides it. */
+    /** One play, at the motion's one speed; `frequency` decides how much silence follows it, never this. */
     const MOTION_MS = { spin: 2400, pulse: 1600, bounce: 1200, blink: 1200 };
     /** Full repaint cadence; store changes and DOM mutations repaint much sooner. */
     const SIDEBAR_REFRESH_MS = 30 * 1000;
@@ -3451,22 +3503,25 @@ window.__ModuleLoader__.load({
       `[${GLYPH_ATTR}]::before{content:attr(${CHAR_ATTR});display:block;font-size:14px;line-height:16px}`,
       `[${GLYPH_ATTR}][${KIND_ATTR}="img"]::before{content:none}`,
       `[${GLYPH_ATTR}] img{display:block;width:16px;height:16px;object-fit:contain;border-radius:3px}`,
-      `[${GLYPH_ATTR}][${MOTION_ATTR}="spin"]{animation:hl-spin 2.4s linear infinite;will-change:transform}`,
-      `[${GLYPH_ATTR}][${MOTION_ATTR}="pulse"]{animation:hl-pulse 1.6s ease-in-out infinite;will-change:transform}`,
-      `[${GLYPH_ATTR}][${MOTION_ATTR}="bounce"]{animation:hl-bounce 1.2s ease-in-out infinite;will-change:transform}`,
-      `[${GLYPH_ATTR}][${MOTION_ATTR}="blink"]{animation:hl-blink 1.2s ease-in-out infinite}`,
+      `[${GLYPH_ATTR}][${MOTION_ATTR}="spin"]{animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}`,
+      `[${GLYPH_ATTR}][${MOTION_ATTR}="pulse"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite;will-change:transform}`,
+      `[${GLYPH_ATTR}][${MOTION_ATTR}="bounce"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite;will-change:transform}`,
+      `[${GLYPH_ATTR}][${MOTION_ATTR}="blink"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}`,
       `${ROW_SELECTOR}[${HIDE_NATIVE_ATTR}] > span:first-child [data-state]{display:none !important}`,
       `html[${MOTION_PAUSED_ATTR}] [${GLYPH_ATTR}],html[${MOTION_PAUSED_ATTR}] [${TEXT_MOTION_ATTR}]{animation-play-state:paused !important}`,
-      `html[${REDUCE_MOTION_ATTR}] [${GLYPH_ATTR}],html[${REDUCE_MOTION_ATTR}] [${TEXT_MOTION_ATTR}]{animation:none !important;will-change:auto !important}`,
-      `@media (prefers-reduced-motion:reduce){[${GLYPH_ATTR}],[${TEXT_MOTION_ATTR}]{animation:none !important;will-change:auto !important}}`,
-      '@keyframes hl-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
-      '@keyframes hl-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}',
-      '@keyframes hl-bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}70%{transform:translateY(0)}90%{transform:translateY(-1.5px)}}',
-      '@keyframes hl-blink{0%,100%{opacity:1}50%{opacity:.35}}',
-      '@keyframes hl-text-pulse{0%,100%{opacity:1;transform:translateX(0)}50%{opacity:.55;transform:translateX(1px)}}',
-      '@keyframes hl-text-spin{0%,100%{opacity:1;transform:translateY(0)}25%{opacity:.7;transform:translateY(-1px)}75%{opacity:.85;transform:translateY(1px)}}',
-      '@keyframes hl-text-bounce{0%,100%{opacity:1;transform:translateY(0)}40%{opacity:.45;transform:translateY(-2px)}70%{opacity:1;transform:translateY(0)}90%{opacity:.9;transform:translateY(-1px)}}',
-      '@keyframes hl-text-blink{0%,100%{opacity:1;transform:none}50%{opacity:.35}}',
+      /**
+       * Reduce motion, root-attribute flavour — one attribute carries all three
+       * modes (`auto` follows the OS, `on` stops, `off` forces), where the media
+       * query that used to sit here could only ever say "stop". The query it
+       * replaces protected exactly this: "when the OS asks for less motion, the
+       * sidebar glyph and the animated title stop". Same protection, now
+       * overridable by the product setting.
+       *
+       * No `!important`, and that is the point: the adapter stops writing
+       * `animation-name` inline when the judgement says off, so this rule has no
+       * inline declaration to outrank.
+       */
+      `html[${REDUCE_MOTION_ATTR}] [${GLYPH_ATTR}],html[${REDUCE_MOTION_ATTR}] [${TEXT_MOTION_ATTR}]{animation:none;will-change:auto}`,
     ].join('');
     /**
      * Takeover of another plugin's state dot: hidden, never removed. The rule
@@ -3722,6 +3777,7 @@ window.__ModuleLoader__.load({
 
       function ensureStyles() {
         if (styleElement !== null) return;
+        ensureMotionCss();
         styleElement = documentRef.createElement('style');
         styleElement.setAttribute(STYLE_ATTR, 'sidebar');
         styleElement.textContent = SIDEBAR_STYLE;
@@ -3830,16 +3886,14 @@ window.__ModuleLoader__.load({
         marker.host.setAttribute(STATE_ATTR, state);
       }
 
+      /** The sidebar only mirrors the shared judgement onto the root for the CSS reveals. */
       function applyRootMotionFlags(settings) {
-        const root = documentRef.documentElement;
-        if (root === null || root === undefined) return;
-        if (settings.display.reduceMotion === 'on') root.setAttribute(REDUCE_MOTION_ATTR, '');
-        else root.removeAttribute(REDUCE_MOTION_ATTR);
+        applyReduceMotionAttr(settings, documentRef);
       }
 
-      /** One shared motion model (5.3.5): the sidebar glyph is no longer a burst lottery.
+      /** One shared motion model (5.3.6): the sidebar glyph is no longer a burst lottery.
        * It follows the same plan as the band pill and the tab seat — same keyframes,
-       * same duration (base / shared tempo), same seed-derived phase. */
+       * same cycle, same seed-derived phase, and one play speed the slider never touches. */
       function quietTakeoverDots(row) {
         const dots = typeof row.querySelectorAll === 'function' ? row.querySelectorAll('[data-dsm-dot]') : [];
         for (const dot of dots) quietDot(dot);
@@ -3866,11 +3920,17 @@ window.__ModuleLoader__.load({
           const plan = motionPlanOf(settings, item.sessionId, category, moved.motion, moved.motionTarget);
           marker.host.setAttribute(MOTION_ATTR, plan.motion);
           if (plan.motion === 'none') {
+            marker.host.style.animationName = '';
             marker.host.style.animationDuration = '';
             marker.host.style.animationDelay = '';
             restoreTextMotion(marker.title);
             continue;
           }
+          /**
+           * One keyframe per duty step: the play runs inside the first `f` of the
+           * cycle and then holds, so the slider buys silence rather than slowness.
+           */
+          marker.host.style.animationName = plan.animationName;
           marker.host.style.animationDuration = `${plan.durationMs}ms`;
           marker.host.style.animationDelay = plan.delayCss;
           if (plan.motionTarget === 'row') animateTitle(marker, plan);
@@ -4023,6 +4083,7 @@ window.__ModuleLoader__.load({
         styleElement = null;
         takeoverStyleElement?.remove?.();
         takeoverStyleElement = null;
+        removeMotionCss();
         const root = documentRef.documentElement;
         root?.removeAttribute?.(MOTION_PAUSED_ATTR);
         root?.removeAttribute?.(REDUCE_MOTION_ATTR);
@@ -4055,8 +4116,8 @@ window.__ModuleLoader__.load({
       /**
        * One shared pause switch: hidden document, and the explicit
        * `reduceMotion: 'on'` flag both land on root attributes the CSS reacts
-       * to — no per-frame JS, and `prefers-reduced-motion` is handled by media
-       * query in the stylesheet.
+       * to — no per-frame JS. Which of the three modes counts as "stop" is
+       * decided once by `motionAllowed`, never by a media query (5.3.6).
        */
       function tick() {
         const root = documentRef.documentElement;
@@ -4109,37 +4170,105 @@ window.__ModuleLoader__.load({
     const COMPLETED_AT_KEY = /dsh.hotlist.completedAt.v1/;
     /** Coalesces a burst of finishes into one write. */
     const COMPLETED_FLUSH_MS = 500;
-    /** Preview loops: the shared tempo model (5.3.5) — the full motion plays, `frequency` only slows it. */
-    const PREVIEW_STEPS = 20;
+    /**
+     * Preview loops: the shared duty model (5.3.6) — the full motion plays and
+     * `frequency` only decides how long the silence after it is.
+     */
+    /**
+     * The duty model's single source of truth. Each stop is a FULL CSS declaration
+     * (`property:value`). Writing a bare value (`rotate(0deg)`) is silently dropped
+     * by the parser: the `@keyframes` block ends up empty and the animation then
+     * runs forever with no visible change - that bug shipped in 5.3.5 and made
+     * every preview except `blink` look frozen.
+     */
     const PREVIEW_FRAMES = {
-      spin: [[0, 'rotate(0deg)'], [1, 'rotate(360deg)']],
-      pulse: [[0, 'scale(1)'], [0.5, 'scale(1.12)'], [1, 'scale(1)']],
-      bounce: [[0, 'translateY(0)'], [0.4, 'translateY(-3px)'], [0.7, 'translateY(0)'], [0.9, 'translateY(-1.5px)'], [1, 'translateY(0)']],
+      spin: [[0, 'transform:rotate(0deg)'], [1, 'transform:rotate(360deg)']],
+      pulse: [[0, 'transform:scale(1)'], [0.5, 'transform:scale(1.12)'], [1, 'transform:scale(1)']],
+      bounce: [[0, 'transform:translateY(0)'], [0.4, 'transform:translateY(-3px)'], [0.7, 'transform:translateY(0)'], [0.9, 'transform:translateY(-1.5px)'], [1, 'transform:translateY(0)']],
       blink: [[0, 'opacity:1'], [0.5, 'opacity:.35'], [1, 'opacity:1']],
     };
 
-    /** One `@keyframes` per motion and duty step: the hold after the motion is the visible gap. */
-    function previewKeyframes() {
+    /**
+     * The `row` target's shape: opacity plus a 1-2px nudge, never layout. Same
+     * stop offsets as the glyph flavour so a title and its glyph breathe together.
+     */
+    const MOTION_TEXT_FRAMES = {
+      spin: [[0, 'opacity:1;transform:translateY(0)'], [0.25, 'opacity:.7;transform:translateY(-1px)'], [0.75, 'opacity:.85;transform:translateY(1px)'], [1, 'opacity:1;transform:translateY(0)']],
+      pulse: [[0, 'opacity:1;transform:translateX(0)'], [0.5, 'opacity:.55;transform:translateX(1px)'], [1, 'opacity:1;transform:translateX(0)']],
+      bounce: [[0, 'opacity:1;transform:translateY(0)'], [0.4, 'opacity:.45;transform:translateY(-2px)'], [0.7, 'opacity:1;transform:translateY(0)'], [0.9, 'opacity:.9;transform:translateY(-1px)'], [1, 'opacity:1;transform:translateY(0)']],
+      blink: [[0, 'opacity:1;transform:none'], [0.5, 'opacity:.35'], [1, 'opacity:1;transform:none']],
+    };
+
+    /** `0.5` -> `50%`, `0.125` -> `12.5%`: no trailing zeros, so `f=1` reads like 5.3.5. */
+    function motionPercent(value) {
+      return `${Number((value * 100).toFixed(2))}%`;
+    }
+
+    /**
+     * Every `(motion, duty step)` pair as one `@keyframes`. The motion plays inside
+     * the first `duty` of the cycle and then **holds its last frame** for the rest:
+     * `rotate(360deg)` and `rotate(0)` are the same pixel, so the hold never jumps,
+     * and the slider buys silence instead of slowness. `f = 1` (step 20) has no hold
+     * and reproduces the hand-written 5.3.5 keyframes stop for stop.
+     */
+    function motionKeyframeRules(frames, nameOf) {
       const rules = [];
       for (const motion of MOTION_NAMES) {
-        const frames = PREVIEW_FRAMES[motion];
-        if (frames === undefined) continue;
-        for (let step = 1; step <= PREVIEW_STEPS; step += 1) {
-          const duty = step / PREVIEW_STEPS;
-          const stops = frames.map(([at, declaration]) => `${(at * duty * 100).toFixed(2)}%{${declaration}}`);
-          rules.push(`@keyframes hl-pv-${motion}-${step}{${stops.join('')}}`);
+        const stops = frames[motion];
+        if (stops === undefined) continue;
+        const hold = stops[stops.length - 1][1];
+        for (let step = 1; step <= MOTION_DUTY_STEPS; step += 1) {
+          const duty = step / MOTION_DUTY_STEPS;
+          const body = stops.map(([at, declaration]) => `${motionPercent(at * duty)}{${declaration}}`);
+          if (duty < 1) body.push(`100%{${hold}}`);
+          rules.push(`@keyframes ${nameOf(motion, step)}{${body.join('')}}`);
         }
       }
       return rules.join('');
     }
 
-    const PREVIEW_KEYFRAMES = previewKeyframes();
+    /** Glyph and title keyframes for every duty step, generated once. */
+    const MOTION_KEYFRAMES = motionKeyframeRules(PREVIEW_FRAMES, motionKeyframeName)
+      + motionKeyframeRules(MOTION_TEXT_FRAMES, motionTextKeyframeName);
 
-    /** The cycle all three surfaces run: full motion, `frequency` scales the tempo (5.3.5). */
+    /** Its own `data-hotlist-style` value, so teardown can find and drop exactly this sheet. */
+    const MOTION_STYLE_ATTR = 'motion';
+
+    /**
+     * One shared stylesheet for `MOTION_KEYFRAMES`. Every surface calls this, so the
+     * table is parsed once even with the band, the tab row, the sidebar and the
+     * settings page all live; whoever is injected first owns the element.
+     */
+    function ensureMotionCss() {
+      if (typeof document === 'undefined') return;
+      if (document.querySelector(`[${STYLE_ATTR}="${MOTION_STYLE_ATTR}"]`) !== null) return;
+      const style = document.createElement('style');
+      style.setAttribute(STYLE_ATTR, MOTION_STYLE_ATTR);
+      style.textContent = MOTION_KEYFRAMES;
+      (document.head ?? document.documentElement).appendChild(style);
+    }
+
+    /**
+     * Drops the shared table only when no other surface still needs it: the band,
+     * the tab row and the settings page each inject their own sheet and call
+     * `ensureMotionCss`, so their presence means the keyframes are still in use.
+     */
+    function removeMotionCss() {
+      if (typeof document === 'undefined') return;
+      /** Literal attribute names: the tab, band and page sheets live in inner scopes. */
+      const inUse = document.querySelector('[data-hotlist-tab-style],[data-hotlist-chip-style],[data-hotlist-style="page"]') !== null;
+      if (inUse) return;
+      const style = document.querySelector(`[${STYLE_ATTR}="${MOTION_STYLE_ATTR}"]`);
+      if (style !== null) style.remove();
+    }
+
+    /** The cycle every surface runs: the play, then the silence `frequency` buys. */
     function previewStyle(motion, frequency) {
+      const step = motionDutyStep(frequency);
       const duration = motionDurationOf(motion, frequency);
-      if (duration === 0) return 'none';
-      return `hl-pv-${motion}-${PREVIEW_STEPS} ${duration}ms linear infinite`;
+      if (duration === 0 || step === 0) return 'none';
+      const timing = MOTION_TIMING[motion] ?? 'linear';
+      return `${motionKeyframeName(motion, step)} ${duration}ms ${timing} infinite`;
     }
     /** Upload gate: static raster only; 16KB is enforced after canvas compression. */
     const GLYPH_FILE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -4234,8 +4363,18 @@ window.__ModuleLoader__.load({
       '.hl-foot{display:flex;align-items:center;gap:12px}',
       '.hl-hidden{display:none}',
       '.hl-page[data-hotlist-glyph]::before{content:none}',
-      PREVIEW_KEYFRAMES,
-      '@media (prefers-reduced-motion:reduce){.hl-page .hl-preview,.hl-page .hl-cardGlyph{animation:none!important}}',
+      /**
+       * Reduce motion for the preview — deliberately nothing to emit. The
+       * preview never honours the setting: it is the only place a user can see
+       * what the motion they picked actually looks like, so stopping it would
+       * turn the picker into a blind choice. `motionAllowed` is what enforces
+       * that, and it is never asked about a preview node.
+       *
+       * What used to sit here was
+       * `@media (prefers-reduced-motion:reduce){.hl-page .hl-preview,.hl-page .hl-cardGlyph{animation:none!important}}`,
+       * protecting "the preview stops when the OS asks for less motion". 5.3.6
+       * moved that decision into JS and exempted the preview on purpose.
+       */
     ].join('');
 
     /** The settings page preview: bound by `apply` to the live player, a no-op before that. */
@@ -4274,6 +4413,10 @@ window.__ModuleLoader__.load({
     /** One shared stylesheet, injected once; the settings dialog may open more than once. */
     function injectPageCss() {
       if (typeof document === 'undefined') return;
+      /** The preview reads the same duty-step keyframes the three surfaces use. */
+      ensureMotionCss();
+      /** The settings page's own CSS-only reveals read the root attribute, so keep it current. */
+      applyReduceMotionAttr(readSettings());
       if (document.querySelector(`[${STYLE_ATTR}="${PAGE_STYLE_ATTR}"]`) !== null) return;
       const style = document.createElement('style');
       style.setAttribute(STYLE_ATTR, PAGE_STYLE_ATTR);
@@ -4450,7 +4593,13 @@ window.__ModuleLoader__.load({
           ? glyph.uploads[0].dataUrl
           : glyph.source === 'popout' ? pickPopoutArt(settings, category).value : '';
         const hasImage = preview !== '';
-        const animate = glyph.motion !== 'none' && glyph.frequency > 0 && settings.display.reduceMotion !== 'on';
+        /**
+         * The preview deliberately ignores `motionAllowed`: it is the only place
+         * a user can see the motion they picked, so `display.reduceMotion: 'on'`
+         * never stops it (5.3.6; see the note in `motionAllowed`). Everything
+         * else — sidebar, tab row, band, the CSS-only reveals — honours it.
+         */
+        const animate = glyph.motion !== 'none' && glyph.frequency > 0;
         const style = { fontSize: `${size}px`, lineHeight: `${size + 2}px` };
         if (animate) style.animation = previewStyle(glyph.motion, glyph.frequency);
         return h('span', {
@@ -5176,6 +5325,44 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * **The one judgement the four real surfaces ask** (5.3.6): may motion run?
+     *
+     *   - `auto` — follow the OS (`prefers-reduced-motion`);
+     *   - `on`   — never, whatever the OS says;
+     *   - `off`  — always, the user overrode the OS on purpose.
+     *
+     * Before 5.3.6 each surface re-derived this from `reduceMotion === 'on'`
+     * plus a `@media` block, so `auto` was half-honoured and `off` could not
+     * win. Every caller now asks here instead.
+     *
+     * **The settings-page preview never calls this, on purpose.** The preview is
+     * the only place a user can see what the motion they picked actually looks
+     * like; stopping it would make the picker a blind choice. `on` stops the
+     * sidebar, the tab row, the band and the missing-group reveal — and nothing
+     * else. Do not "fix" the preview by wiring it in here; see `PAGE_CSS`.
+     */
+    function motionAllowed(settings, win) {
+      const mode = settings?.display?.reduceMotion;
+      if (mode === 'on') return false;
+      if (mode === 'off') return true;
+      return prefersReducedMotion(win) === false;
+    }
+
+    /**
+     * Write `motionAllowed`'s answer to the root element so the pure-CSS rules
+     * (the missing-group arrow and list entrance) can read it. JS never reads it
+     * back: it is a paint hint, not state. Idempotent, so every surface that
+     * injects CSS calls it without coordinating.
+     */
+    function applyReduceMotionAttr(settings, doc) {
+      const target = doc || (HAS_BROWSER ? document : null);
+      const root = target === null || target === undefined ? null : target.documentElement;
+      if (root === null || root === undefined) return;
+      if (motionAllowed(settings) === true) root.removeAttribute(REDUCE_MOTION_ATTR);
+      else root.setAttribute(REDUCE_MOTION_ATTR, '');
+    }
+
     function isDocumentHidden(doc) {
       const target = doc || (HAS_BROWSER ? document : null);
       return !!(target && target.hidden);
@@ -5631,11 +5818,8 @@ window.__ModuleLoader__.load({
       /** sessionId → category of the latest observe(); feeds the manual hotkey. */
       const latest = new Map();
 
-      const reduced = () => {
-        const settings = getSettings();
-        if (settings.display.reduceMotion === 'on') return true;
-        return prefersReducedMotion(doc()?.defaultView);
-      };
+      /** The popout is not one of the four surfaces, but it obeys the same three modes. */
+      const reduced = () => motionAllowed(getSettings(), doc()?.defaultView) === false;
 
       const ensureKit = () => {
         if (kit !== null) return kit;
@@ -6659,31 +6843,51 @@ window.__ModuleLoader__.load({
        * has a real text node to move. `glyph` targets never create it.
        */
       const TAB_TITLE_ATTR = 'data-hotlist-tab-title';
+      /**
+       * The host's *own* label span, marked so a `row` target can animate the
+       * text (§5.3.6). We never wrap, clone or restyle that element: the only
+       * thing we add is this attribute plus the inline animation-name the
+       * shared table names. `TAB_TITLE_ATTR` stays reserved for the legacy
+       * wrapper an earlier build created, so the unwrap path still finds it.
+       */
+      const TAB_LABEL_ATTR = 'data-hotlist-tab-label';
       const TAB_STYLE_ATTR = 'data-hotlist-tab-style';
       const TAB_CSS = [
-        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="spin"]{animation:hl-spin 2.4s linear infinite}',
-        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="pulse"]{animation:hl-pulse 1.6s ease-in-out infinite}',
-        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="bounce"]{animation:hl-bounce 1.2s ease-in-out infinite}',
-        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="blink"]{animation:hl-blink 1.2s ease-in-out infinite}',
+        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="spin"]{animation-timing-function:linear;animation-iteration-count:infinite}',
+        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="pulse"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="bounce"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[' + TAB_GLYPH_ATTR + '][data-hotlist-motion="blink"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
         '[' + TAB_GLYPH_ATTR + ']{display:inline-block;margin-right:4px}',
-        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="spin"]{animation:hl-text-spin 2.4s linear infinite}',
-        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="pulse"]{animation:hl-text-pulse 1.6s ease-in-out infinite}',
-        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="bounce"]{animation:hl-text-bounce 1.2s ease-in-out infinite}',
-        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="blink"]{animation:hl-text-blink 1.2s ease-in-out infinite}',
-        '@keyframes hl-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
-        '@keyframes hl-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}',
-        '@keyframes hl-bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}70%{transform:translateY(0)}90%{transform:translateY(-1.5px)}}',
-        '@keyframes hl-blink{0%,100%{opacity:1}50%{opacity:.35}}',
-        '@keyframes hl-text-spin{0%,100%{opacity:1;transform:translateY(0)}25%{opacity:.7;transform:translateY(-1px)}75%{opacity:.85;transform:translateY(1px)}}',
-        '@keyframes hl-text-pulse{0%,100%{opacity:1;transform:translateX(0)}50%{opacity:.55;transform:translateX(1px)}}',
-        '@keyframes hl-text-bounce{0%,100%{opacity:1;transform:translateY(0)}40%{opacity:.45;transform:translateY(-2px)}70%{opacity:1;transform:translateY(0)}90%{opacity:.9;transform:translateY(-1px)}}',
-        '@keyframes hl-text-blink{0%,100%{opacity:1;transform:none}50%{opacity:.35}}',
-        'html[' + REDUCE_MOTION_ATTR + '] [' + TAB_GLYPH_ATTR + '],html[' + REDUCE_MOTION_ATTR + '] [' + TAB_TITLE_ATTR + ']{animation:none !important}',
-        '@media (prefers-reduced-motion:reduce){[' + TAB_GLYPH_ATTR + '],[' + TAB_TITLE_ATTR + ']{animation:none !important}}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="spin"]{animation-timing-function:linear;animation-iteration-count:infinite}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="pulse"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="bounce"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[' + TAB_TITLE_ATTR + '][data-hotlist-motion="blink"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        /**
+         * The host's own label span, marked by a `row` target. Only the timing
+         * is set here; the keyframe *name* (which carries the duty step) is
+         * written inline by `decorateTabSeat`, exactly like the sidebar.
+         */
+        '[' + TAB_LABEL_ATTR + '][data-hotlist-motion="spin"]{animation-timing-function:linear;animation-iteration-count:infinite}',
+        '[' + TAB_LABEL_ATTR + '][data-hotlist-motion="pulse"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[' + TAB_LABEL_ATTR + '][data-hotlist-motion="bounce"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[' + TAB_LABEL_ATTR + '][data-hotlist-motion="blink"]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        /**
+         * Reduce motion, root-attribute flavour. The media query that used to
+         * sit below protected "the tab seat's glyph and title stop when the OS
+         * asks for less motion"; the attribute carries all three modes now, so
+         * the product setting can override the OS in either direction.
+         *
+         * No `!important`: `decorateTabSeat` stops writing `animationName`
+         * inline when the judgement says off, so nothing inline needs beating.
+         */
+        'html[' + REDUCE_MOTION_ATTR + '] [' + TAB_GLYPH_ATTR + '],html[' + REDUCE_MOTION_ATTR + '] [' + TAB_TITLE_ATTR + '],html[' + REDUCE_MOTION_ATTR + '] [' + TAB_LABEL_ATTR + ']{animation:none}',
       ].join('');
 
       function injectTabCss() {
         if (typeof document === 'undefined') return;
+        ensureMotionCss();
+        /** The seat's reduce-motion rule reads the root attribute: publish it before use. */
+        applyReduceMotionAttr(readSettings());
         if (document.querySelector('[' + TAB_STYLE_ATTR + ']') !== null) return;
         const style = document.createElement('style');
         style.setAttribute(TAB_STYLE_ATTR, '');
@@ -6714,6 +6918,35 @@ window.__ModuleLoader__.load({
         return null;
       }
 
+      /**
+       * One `row`-target helper for the tab row (§5.3.6). A `row` target moves
+       * the *host's own* label span — the element that already holds the tab's
+       * text node — so no wrapper is created, cloned or restyled. Passing
+       * `null` puts that span back exactly as the host left it (attribute
+       * removed, inline animation cleared); the element is the host's, so it is
+       * never removed.
+       *
+       * The glyph sits inside that same span, which is why a row target gives
+       * the glyph no animation of its own: one moving node per seat, otherwise
+       * the icon would ride two transforms at once.
+       */
+      function paintTabLabel(label, plan, delay) {
+        if (label === null) return;
+        if (plan === null) {
+          if (label.hasAttribute(TAB_LABEL_ATTR)) label.removeAttribute(TAB_LABEL_ATTR);
+          if (label.getAttribute('data-hotlist-motion') !== null) label.removeAttribute('data-hotlist-motion');
+          if (label.style.animationName !== '') label.style.animationName = '';
+          if (label.style.animationDuration !== '') label.style.animationDuration = '';
+          if (label.style.animationDelay !== '') label.style.animationDelay = '';
+          return;
+        }
+        if (!label.hasAttribute(TAB_LABEL_ATTR)) label.setAttribute(TAB_LABEL_ATTR, '');
+        if (label.getAttribute('data-hotlist-motion') !== plan.motion) label.setAttribute('data-hotlist-motion', plan.motion);
+        if (label.style.animationName !== plan.textAnimationName) label.style.animationName = plan.textAnimationName;
+        if (label.style.animationDuration !== `${plan.durationMs}ms`) label.style.animationDuration = `${plan.durationMs}ms`;
+        if (label.style.animationDelay !== delay) label.style.animationDelay = delay ?? '';
+      }
+
       function decorateTabSeat(settings, seat) {
         if (typeof document === 'undefined') return;
         const row = document.querySelector('[data-conversation-tabs]');
@@ -6723,11 +6956,21 @@ window.__ModuleLoader__.load({
         const category = seat.category ?? (token === null ? 'running' : (CATEGORY_OF_TOKEN[token] ?? 'running'));
         const moved = shown === '' || token === null ? { motion: 'none', motionTarget: 'glyph' } : tokenMotion(settings, token);
         /**
-         * A tab seat animates its glyph and nothing else. `motionTarget` is a
-         * band/sidebar concept: the tab label is a host button whose text the
-         * host also owns, so wrapping it broke the host layout and left the
-         * hourglass frozen. The rule is "the emoji in this tab always moves when
-         * its category has a motion".
+         * Two targets, one moving node (§5.3.6):
+         *
+         * - `glyph` moves the emoji span we own. This is the pre-5.3.6
+         *   behaviour and stays the fallback whenever the host gives us no
+         *   element to animate.
+         * - `row` moves the host's own label span (the element that already
+         *   holds the tab's text node), so the *title* finally moves on the tab
+         *   row too. No wrapper is created: an earlier build wrapped the title
+         *   and had to be reverted, because inserting a node changed the host's
+         *   tab metrics. The glyph sits inside that span and therefore gets no
+         *   animation of its own — riding one transform, not two.
+         *
+         * If the text node turns out to sit directly under the `<button>` (an
+         * older host), there is no label element to mark; a `row` request then
+         * falls back to the glyph rather than animating the host's button.
          */
         const plan = motionPlanOf(settings, seat.sessionId, category, moved.motion, moved.motionTarget);
         const delay = plan.motion !== 'none' ? plan.delayCss : void 0;
@@ -6746,8 +6989,12 @@ window.__ModuleLoader__.load({
             if (text !== null) parent.insertBefore(text, wrapped);
             wrapped.remove();
           }
+          /** The host's label element, only when it is a real node under the button. */
+          const label = parent !== null && parent !== button && typeof parent.setAttribute === 'function' ? parent : null;
+          const rowTarget = plan.motion !== 'none' && plan.motionTarget === 'row' && label !== null;
           if (shown === '') {
             if (glyph !== null) glyph.remove();
+            paintTabLabel(label, null);
             /** Text mode still has to strip the title's own emoji — we own the row. */
             if (textNode.textContent !== wanted) textNode.textContent = wanted;
             return;
@@ -6758,10 +7005,19 @@ window.__ModuleLoader__.load({
             parent.insertBefore(glyph, textNode);
           }
           if (glyph.textContent !== shown) glyph.textContent = shown;
-          if (glyph.getAttribute('data-hotlist-motion') !== plan.motion) glyph.setAttribute('data-hotlist-motion', plan.motion);
+          paintTabLabel(label, rowTarget ? plan : null, delay);
+          /** A row target is carried by the label, so the glyph must not also run. */
+          const glyphMotion = rowTarget ? 'none' : plan.motion;
+          if (glyph.getAttribute('data-hotlist-motion') !== glyphMotion) glyph.setAttribute('data-hotlist-motion', glyphMotion);
           if (glyph.style.animationDelay !== delay) glyph.style.animationDelay = delay ?? '';
-          if (plan.motion === 'none') glyph.style.animationDuration = '';
-          else if (glyph.style.animationDuration !== `${plan.durationMs}ms`) glyph.style.animationDuration = `${plan.durationMs}ms`;
+          /** The duty step lives in the keyframe name, so name and duration move together. */
+          if (glyphMotion === 'none') {
+            glyph.style.animationName = '';
+            glyph.style.animationDuration = '';
+          } else {
+            if (glyph.style.animationName !== plan.animationName) glyph.style.animationName = plan.animationName;
+            if (glyph.style.animationDuration !== `${plan.durationMs}ms`) glyph.style.animationDuration = `${plan.durationMs}ms`;
+          }
           /** One emoji, never two: the host text keeps only the title. */
           if (textNode.textContent !== wanted) textNode.textContent = wanted;
           return;
@@ -6779,6 +7035,8 @@ window.__ModuleLoader__.load({
         if (row !== null) {
           for (const glyph of row.querySelectorAll('[' + TAB_GLYPH_ATTR + ']')) glyph.remove();
           for (const title of row.querySelectorAll('[' + TAB_TITLE_ATTR + ']')) title.remove();
+          /** The label span is the host's: clean the paint, never the element. */
+          for (const label of row.querySelectorAll('[' + TAB_LABEL_ATTR + ']')) paintTabLabel(label, null);
         }
         removeTabCss();
         if (tabTimer !== null) {
@@ -6985,7 +7243,8 @@ window.__ModuleLoader__.load({
        */
       function topbarChips(settings, plan) {
         const mode = settings.topbar.titleMode;
-        const reduced = settings.display.reduceMotion === 'on';
+        /** The band is one of the four real surfaces, so it asks the shared judgement. */
+        const reduced = motionAllowed(settings) === false;
         const chips = [];
         for (const seat of plan) {
           const category = CATEGORY_OF_TOKEN[seat.token] ?? 'running';
@@ -7109,14 +7368,17 @@ window.__ModuleLoader__.load({
           attrs['data-hotlist-chip-motion'] = chip.motion;
           attrs['data-hotlist-chip-target'] = chip.motionTarget === 'row' ? 'row' : 'emoji';
         }
-        /** Same deterministic phase as the tab row: both open the keyframe at the same point. */
+        /** Same deterministic phase as the tab row: both open the cycle at the same point. */
         const delay = chip.plan !== void 0 && chip.plan.motion !== 'none' ? chip.plan.delayCss : void 0;
         const duration = chip.plan !== void 0 && chip.plan.motion !== 'none' ? `${chip.plan.durationMs}ms` : void 0;
+        /** The duty step is baked into the keyframe name, so the name travels with the duration. */
+        const emojiName = chip.plan !== void 0 && chip.plan.motion !== 'none' ? chip.plan.animationName : void 0;
+        const titleName = chip.plan !== void 0 && chip.plan.motion !== 'none' ? chip.plan.textAnimationName : void 0;
         return h('button', attrs, [
           chip.emoji === '' || chip.emoji === void 0
             ? null
-            : h('span', { key: 'glyph', 'data-hotlist-chip-emoji': '', style: { fontSize: '14px', lineHeight: '24px', ...(chip.motionTarget !== 'row' && delay !== void 0 ? { animationDelay: delay, animationDuration: duration } : {}) } }, chip.emoji),
-          h('span', { key: 'title', 'data-hotlist-chip-title': '', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', ...(chip.motionTarget === 'row' && delay !== void 0 ? { animationDelay: delay, animationDuration: duration } : {}) } }, chipLabelOf(chip)),
+            : h('span', { key: 'glyph', 'data-hotlist-chip-emoji': '', style: { fontSize: '14px', lineHeight: '24px', ...(chip.motionTarget !== 'row' && delay !== void 0 ? { animationName: emojiName, animationDelay: delay, animationDuration: duration } : {}) } }, chip.emoji),
+          h('span', { key: 'title', 'data-hotlist-chip-title': '', style: { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', ...(chip.motionTarget === 'row' && delay !== void 0 ? { animationName: titleName, animationDelay: delay, animationDuration: duration } : {}) } }, chipLabelOf(chip)),
         ]);
       }
 
@@ -7235,28 +7497,32 @@ window.__ModuleLoader__.load({
        * the band works with the sidebar off.
        */
       const CHIP_CSS = [
-        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-emoji]{animation:hl-spin 2.4s linear infinite;will-change:transform}',
-        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-emoji]{animation:hl-pulse 1.6s ease-in-out infinite;will-change:transform}',
-        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-emoji]{animation:hl-bounce 1.2s ease-in-out infinite;will-change:transform}',
-        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-emoji]{animation:hl-blink 1.2s ease-in-out infinite}',
-        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-title]{animation:hl-text-spin 2.4s linear infinite}',
-        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-title]{animation:hl-text-pulse 1.6s ease-in-out infinite}',
-        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation:hl-text-bounce 1.2s ease-in-out infinite}',
-        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-title]{animation:hl-text-blink 1.2s ease-in-out infinite}',
-        '@keyframes hl-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
-        '@keyframes hl-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}',
-        '@keyframes hl-bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}70%{transform:translateY(0)}90%{transform:translateY(-1.5px)}}',
-        '@keyframes hl-blink{0%,100%{opacity:1}50%{opacity:.35}}',
-        '@keyframes hl-text-spin{0%,100%{opacity:1;transform:translateY(0)}25%{opacity:.7;transform:translateY(-1px)}75%{opacity:.85;transform:translateY(1px)}}',
-        '@keyframes hl-text-pulse{0%,100%{opacity:1;transform:translateX(0)}50%{opacity:.55;transform:translateX(1px)}}',
-        '@keyframes hl-text-bounce{0%,100%{opacity:1;transform:translateY(0)}40%{opacity:.45;transform:translateY(-2px)}70%{opacity:1;transform:translateY(0)}90%{opacity:.9;transform:translateY(-1px)}}',
-        '@keyframes hl-text-blink{0%,100%{opacity:1;transform:none}50%{opacity:.35}}',
-        `html[${REDUCE_MOTION_ATTR}] [data-hotlist-chip]{animation:none !important}html[${REDUCE_MOTION_ATTR}] [data-hotlist-chip] *{animation:none !important}`,
-        '@media (prefers-reduced-motion:reduce){[data-hotlist-chip],[data-hotlist-chip] *{animation:none !important}}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-emoji]{animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-emoji]{animation-timing-function:ease-in-out;animation-iteration-count:infinite;will-change:transform}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-emoji]{animation-timing-function:ease-in-out;animation-iteration-count:infinite;will-change:transform}',
+        '[data-hotlist-chip][data-hotlist-chip-target="emoji"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-emoji]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="spin"] [data-hotlist-chip-title]{animation-timing-function:linear;animation-iteration-count:infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="pulse"] [data-hotlist-chip-title]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="bounce"] [data-hotlist-chip-title]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        '[data-hotlist-chip][data-hotlist-chip-target="row"][data-hotlist-chip-motion="blink"] [data-hotlist-chip-title]{animation-timing-function:ease-in-out;animation-iteration-count:infinite}',
+        /**
+         * Reduce motion, root-attribute flavour. The media query that used to
+         * sit below protected "the band pill and everything inside it stop when
+         * the OS asks for less motion"; the attribute carries all three modes,
+         * so the product setting can override the OS either way.
+         *
+         * No `!important`: `topbarChipNode` only writes `animationName` inline
+         * when the judgement says motion is allowed, so nothing inline is left
+         * to outrank this rule.
+         */
+        `html[${REDUCE_MOTION_ATTR}] [data-hotlist-chip]{animation:none}html[${REDUCE_MOTION_ATTR}] [data-hotlist-chip] *{animation:none}`,
       ].join('');
 
       function injectChipCss() {
         if (typeof document === 'undefined') return;
+        ensureMotionCss();
+        /** The pill's reduce-motion rule reads the root attribute: publish it before use. */
+        applyReduceMotionAttr(readSettings());
         if (document.querySelector(`[${CHIP_STYLE_ATTR}]`) !== null) return;
         const style = document.createElement('style');
         style.setAttribute(CHIP_STYLE_ATTR, '');
@@ -7334,11 +7600,23 @@ window.__ModuleLoader__.load({
         '.hl-missingWhy{color:var(--dsw-alias-label-secondary);font-size:12px}',
         '.hl-missingHint{color:var(--dsw-alias-label-secondary);font-size:12px;margin:0 0 6px}',
         '@keyframes hlMissingIn{from{transform:translateY(-4px)}to{transform:translateY(0)}}',
-        '@media (prefers-reduced-motion:reduce){.hl-missingGroupName::before{transition:none}.hl-missingGroup[open]>.hl-missingList{animation:none}}',
+        /**
+         * Reduce motion, root-attribute flavour — the one media query worth
+         * keeping as a real protection. What it protected: the disclosure
+         * arrow's `transition` and the `hlMissingIn` list entrance stop when the
+         * OS asks for less motion. Unlike the other four, nothing here competes
+         * with an inline animation written by JS, so it was a genuine
+         * CSS-only protection and stays CSS — only the trigger moves from the
+         * media query to the root attribute, so `display.reduceMotion` can
+         * override the OS in both directions.
+         */
+        `html[${REDUCE_MOTION_ATTR}] .hl-missingGroupName::before{transition:none}html[${REDUCE_MOTION_ATTR}] .hl-missingGroup[open]>.hl-missingList{animation:none}`,
       ].join('');
 
       function injectViewCss() {
         if (typeof document === 'undefined') return;
+        /** This view's reveals are CSS-only, so they read the root attribute: keep it current. */
+        applyReduceMotionAttr(readSettings());
         if (document.querySelector(`[${VIEW_STYLE_ATTR}]`) !== null) return;
         const style = document.createElement('style');
         style.setAttribute(VIEW_STYLE_ATTR, '');
@@ -7667,6 +7945,8 @@ window.__ModuleLoader__.load({
       ctx.effect(() => onSettingsChange(() => {
         /** The popout never reopens by itself after a settings write: the next entry decides. */
         popout?.settingsChanged();
+        /** Publish the reduce-motion judgement first: every surface below reads the root attribute. */
+        applyReduceMotionAttr(readSettings());
         sync();
         sidebar?.refresh();
       }), 'hotlist: settings');
@@ -8026,6 +8306,23 @@ window.__ModuleLoader__.load({
       trimAssetBudget,
       fnv1a,
       motionPhaseOf,
+      motionPlanOf,
+      motionAllowed,
+      applyReduceMotionAttr,
+      REDUCE_MOTION_ATTR,
+      SIDEBAR_STYLE,
+      PAGE_CSS,
+      KIT_CSS,
+      MOTION_KEYFRAMES,
+      motionDutyStep,
+      motionPlayMs,
+      motionDurationOf,
+      motionRestMs,
+      motionKeyframeName,
+      motionTextKeyframeName,
+      MOTION_MS,
+      PREVIEW_FRAMES,
+      MOTION_TEXT_FRAMES,
       pickIndex,
       randomIndex,
       pickPopoutArt,
