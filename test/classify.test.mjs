@@ -4721,13 +4721,15 @@ test('the cap has no auto mode and the window default replaces the old one', () 
 
 test('display metadata: the plugin list can show a name and an icon', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '..', 'package.json'), 'utf8'));
-  assert.equal(pkg.icon, './icon.svg', 'manifest icon');
+  assert.equal(pkg.icon, './icon.png', 'manifest icon');
   assert.ok(pkg.exports['./icon'], 'the icon is reachable as a package resource');
   assert.ok(pkg.exports['./locale/*.json'], 'locale files are reachable as package resources');
-  assert.ok(pkg.files.includes('icon.svg') && pkg.files.includes('locale'), 'both ship inside the tarball');
-  const svg = readFileSync(join(HERE, '..', 'icon.svg'), 'utf8');
-  assert.ok(svg.startsWith('<svg'), 'icon.svg is an SVG');
-  assert.ok(Buffer.byteLength(svg) <= 256 * 1024, 'under the hosts 256 KiB cap');
+  assert.ok(pkg.files.includes('icon.png') && pkg.files.includes('locale'), 'both ship inside the tarball');
+  const png = readFileSync(join(HERE, '..', 'icon.png'));
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'icon.png is a PNG');
+  assert.equal(png.readUInt32BE(16), 100, 'icon width is 100');
+  assert.equal(png.readUInt32BE(20), 100, 'icon height is 100');
+  assert.ok(png.length <= 256 * 1024, 'under the hosts 256 KiB cap');
   for (const lang of ['en', 'zh']) {
     const meta = JSON.parse(readFileSync(join(HERE, '..', 'locale', lang + '.json'), 'utf8')).meta;
     assert.ok(meta && typeof meta.title === 'string' && meta.title.trim(), lang + ' title');

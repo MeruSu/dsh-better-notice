@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.3.8 — 2026-11-19
+
+**图标换成 PNG（meru 系）。**
+
 ## 5.3.7 — 2026-11-17
 
 **Packaging only: `engines.dsh` and `repository`.** This release adds
